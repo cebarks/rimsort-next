@@ -141,3 +141,36 @@ The design was revised before implementation:
   DEP_STEAM_API_LIB_DIR. Keep the pin and document verified explicit/adjacent
   runtime loading; do not guess metadata, embed builder paths, upgrade unrelated
   dependencies or redistribute uncertain SDK assets.
+- D41: profile writers compare loaded/last-written bytes under a separate stable
+  `profiles.json.lock` OS lock. Stale or contended writers fail without changing
+  disk/memory; explicit reload is sufficient. Do not lock the JSON inode that
+  atomic replacement swaps, or add a watcher/synchronization framework.
+- D42: UI close intent must reflect actual Workflow ownership, not a latched
+  attempt. Warning Cancel must genuinely cancel, and a rejected answer must not
+  erase an owned prompt. Fix and test the complete visible-control path, including
+  close and replacement workflows, before integrating profiles/rules.
+- D43: a downloaded rule cache is a fact distinct from live Session adoption.
+  Defer revision-changing policy adoption through protected operations, especially
+  until a committed save receipt is acknowledged. Read the live enabled setting.
+- D44: canonical helper executable is `rimsort-next-steam`. Preserve bounded
+  structured item failure stage/kind/message at the protocol boundary; do not
+  erase native error causes or invent causes unavailable from the safe binding.
+  Use host-absolute test fixtures and do not claim Windows runtime verification.
+- D45: export protection must establish destination identity even when the final
+  configured file is absent. Resolve parents/ancestors and fail closed on
+  ambiguous/dangling identities. Direct same-file 1.0.6 is approved (already in
+  Cargo.lock) rather than hand-written unsafe Windows identity code.
+- D46: overlap the independent SteamCMD/resolver/installer backend with local
+  review fixes in its own worktree. UI/launch/close integration remains a separate
+  part of the same Task 4 vertical slice; backend completion is not feature delivery.
+- D47: live read-only legacy Steam API evidence lacks `file_type` in ordinary item
+  details, and a noncollection query can return `resultcount: 0` plus an error row.
+  Correlate per-row IDs/results, retain an item-candidate distinction, and do not
+  mock nonexistent type guarantees or silently turn unavailable collections empty.
+- D48: preserve process-local Linux SteamCMD HOME/XDG isolation. The pinned Python
+  wrapper documents real desktop `libraryfolders.vdf` clobbering without it.
+  Also isolate cache under the app-owned workspace; never alter global environment
+  or claim this is a native-process sandbox. Tests remain controlled executables.
+- D49: review identified a full synchronous community sort on each validation
+  repaint. Keep this as an explicit integrated performance check/caching decision
+  for Task 6, not an unmeasured responsiveness success claim.
