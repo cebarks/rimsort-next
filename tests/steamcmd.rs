@@ -56,6 +56,51 @@ fn real_process_is_isolated_and_only_proven_content_is_published() {
 }
 
 #[test]
+fn sgr_wrapped_real_receipts_publish_only_proven_content_and_failure_wins() {
+    for failed in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let fixture = SUCCESS.replace("        print(", "        # print(");
+        let mut body = format!(
+            "{fixture}\n{}",
+            r#"receipt=b'\x1b[0mSuccess. Downloaded item 2009463077 to "/work/content/steamapps/workshop/content/294100/2009463077" (8306239 bytes) \x1b[0m\x1b[1mquit\n'
+for byte in receipt: os.write(1,bytes([byte]))
+"#
+        );
+        if failed {
+            body.push_str(
+                r#"os.write(2,b'\x1b[31mERROR! Download item 2009463077 failed (Failure).\x1b[0m\n')
+os.write(1,receipt)
+"#,
+            );
+        }
+        let cfg = config(temp.path(), &body);
+        let id = PublishedFileId::try_from(2009463077).unwrap();
+        let report = run_downloads(&cfg, &[id], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert_eq!(
+            report.items[0].download,
+            if failed {
+                DownloadOutcome::Failed
+            } else {
+                DownloadOutcome::Succeeded
+            }
+        );
+        assert_eq!(
+            report.items[0].outcome,
+            if failed {
+                ItemOutcome::Failed
+            } else {
+                ItemOutcome::Succeeded
+            }
+        );
+        assert_eq!(
+            cfg.mods_root.join("2009463077/About/About.xml").is_file(),
+            !failed
+        );
+        assert!(report.cleanup_error.is_none());
+    }
+}
+
+#[test]
 fn zero_exit_without_item_success_and_explicit_failure_never_install() {
     for body in [
         "print('all done')",
@@ -194,22 +239,68 @@ fn overlong_lines_cannot_smuggle_success_or_force_unbounded_retention() {
 #[test]
 fn escaped_pipe_holder_reports_cleanup_failure_instead_of_hanging() {
     let temp = tempfile::tempdir().unwrap();
-    let mut cfg = config(
-        temp.path(),
-        "import subprocess\nsubprocess.Popen(['/usr/bin/sleep','1'],start_new_session=True)",
-    );
-    cfg.batch_timeout = Duration::from_millis(50);
-    let start = std::time::Instant::now();
-    let report = run_downloads(
+    let mut cfg = config(temp.path(), SUCCESS);
+    let previous = run_downloads(
         &cfg,
-        &[PublishedFileId::try_from(42).unwrap()],
+        &[PublishedFileId::try_from(1).unwrap()],
         &AtomicBool::new(false),
         &mut |_| {},
     )
     .unwrap();
-    assert!(start.elapsed() < Duration::from_millis(700));
+    let manifest_path = temp.path().join(".rimsort-next-Mods/manifest.json");
+    let manifest_before = fs::read(&manifest_path).unwrap();
+    // The first batch includes IDs without receipts; the second must never start.
+    let fixture = SUCCESS.replace(
+        "        print('Success. Downloaded item '+id+",
+        "        if int(id)==1: print('Success. Downloaded item '+id+",
+    );
+    fs::write(
+        &cfg.executable,
+        format!("#!/usr/bin/python3\n{fixture}\nimport subprocess\nfor i in range(1100): print('filler',flush=True)\nprint('ERROR! Download item 2 failed (Failure).',flush=True)\nprint('Success. Downloaded item 3 to ignored',flush=True)\nsubprocess.Popen(['/usr/bin/sleep','2'],start_new_session=True)"),
+    )
+    .unwrap();
+    cfg.batch_timeout = Duration::from_secs(3);
+    let start = std::time::Instant::now();
+    let ids: Vec<_> = (1..=21)
+        .map(|id| PublishedFileId::try_from(id).unwrap())
+        .collect();
+    let report = run_downloads(&cfg, &ids, &AtomicBool::new(false), &mut |_| {}).unwrap();
+    assert!(start.elapsed() < Duration::from_millis(1500));
     assert!(report.cleanup_error.is_some());
-    assert_ne!(report.items[0].outcome, ItemOutcome::Succeeded);
+    assert!(report.logs_truncated);
+    assert_eq!(report.runs.len(), 1);
+    assert_eq!(report.items[0].download, DownloadOutcome::Succeeded);
+    assert_eq!(report.items[1].download, DownloadOutcome::Failed);
+    assert_eq!(report.items[2].download, DownloadOutcome::Succeeded);
+    assert!(
+        report.items[3..20]
+            .iter()
+            .all(|row| row.download == DownloadOutcome::Unverified)
+    );
+    assert_eq!(report.items[20].download, DownloadOutcome::NotStarted);
+    assert!(
+        report
+            .items
+            .iter()
+            .all(|row| row.outcome != ItemOutcome::Succeeded)
+    );
+    assert_eq!(
+        report.items[0].installations,
+        previous.items[0].installations
+    );
+    assert!(
+        report.items[1..]
+            .iter()
+            .all(|row| row.installations.is_empty())
+    );
+    assert_eq!(fs::read(&manifest_path).unwrap(), manifest_before);
+    assert_eq!(fs::read_dir(&cfg.mods_root).unwrap().count(), 1);
+    assert_eq!(
+        fs::read_dir(temp.path().join(".rimsort-next-Mods/backups"))
+            .unwrap()
+            .count(),
+        0
+    );
 }
 
 #[test]

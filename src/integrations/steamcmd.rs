@@ -25,6 +25,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(test)]
+#[path = "../../tests/support/steamcmd_receipts.rs"]
+mod tests;
+
 #[derive(Clone, Debug)]
 pub struct SteamCmdConfig {
     pub executable: PathBuf,
@@ -124,7 +128,11 @@ pub(crate) fn run_downloads_with_updates(
     }
     for start in (0..ids.len()).step_by(20) {
         let end = (start + 20).min(ids.len());
-        if let Some(reason) = report.recovery_required.clone() {
+        if let Some(reason) = report
+            .recovery_required
+            .clone()
+            .or(report.cleanup_error.clone())
+        {
             fail_pending(&mut report.items[start..], &reason, event);
             break;
         }
@@ -160,13 +168,18 @@ pub(crate) fn run_downloads_with_updates(
                 break;
             }
         };
+        report.cleanup_error = batch.cleanup_error;
         for row in &mut report.items[start..end] {
             row.download = batch
                 .receipts
                 .get(&row.item_id)
                 .copied()
                 .unwrap_or(batch.fallback);
-            if let Some(reason) = &report.recovery_required {
+            if let Some(reason) = report
+                .recovery_required
+                .as_ref()
+                .or(report.cleanup_error.as_ref())
+            {
                 row.outcome = ItemOutcome::Failed;
                 row.diagnostics.push(reason.clone());
                 event(AcquisitionEvent::Item(row.clone()));
@@ -176,11 +189,12 @@ pub(crate) fn run_downloads_with_updates(
                 let source = run
                     .join("content/steamapps/workshop/content/294100")
                     .join(row.item_id.get().to_string());
+                let upstream = updated.get(&row.item_id).copied().flatten();
                 match installer.promote(
                     row.item_id,
                     &source,
                     &config.target_version,
-                    updated.get(&row.item_id).copied().flatten(),
+                    upstream,
                     cancel,
                 ) {
                     Ok(promotion) => {
@@ -194,13 +208,15 @@ pub(crate) fn run_downloads_with_updates(
                         )];
                     }
                     Err(AcquisitionError::Cancelled) => row.outcome = ItemOutcome::Cancelled,
-                    Err(e) => {
-                        row.outcome = ItemOutcome::Failed;
-                        row.diagnostics.push(e.to_string());
-                        if let Err(recovery) = installer.recover() {
-                            report.recovery_required = Some(recovery.to_string());
-                        }
-                    }
+                    Err(e) => promotion_failed(
+                        &mut installer,
+                        config,
+                        row,
+                        upstream,
+                        e,
+                        &mut report.recovery_required,
+                        &mut report.warnings,
+                    ),
                 }
             } else {
                 row.outcome = match row.download {
@@ -217,6 +233,36 @@ pub(crate) fn run_downloads_with_updates(
     event(AcquisitionEvent::Finished(report.clone()));
     Ok(report)
 }
+pub(super) fn promotion_failed(
+    installer: &mut Installer,
+    config: &SteamCmdConfig,
+    row: &mut AcquisitionItem,
+    upstream: Option<u64>,
+    error: AcquisitionError,
+    recovery_required: &mut Option<String>,
+    warnings: &mut Vec<String>,
+) {
+    row.outcome = ItemOutcome::Failed;
+    row.diagnostics.push(error.to_string());
+    let recovered = installer.recover();
+    warnings.extend(installer.take_warnings());
+    row.installations.clear();
+    match recovered.and_then(|()| installer.observation(row.item_id)) {
+        Ok(Some(record)) => row.installations.push(observation(
+            config,
+            row.item_id,
+            record.upstream_updated,
+            upstream,
+        )),
+        Ok(None) => {}
+        Err(error) => {
+            let reason = format!("installation observation after recovery is unverified: {error}");
+            row.diagnostics.push(reason.clone());
+            *recovery_required = Some(reason);
+        }
+    }
+}
+
 fn fail_pending(
     rows: &mut [AcquisitionItem],
     reason: &str,
@@ -271,10 +317,22 @@ struct BatchResult {
     receipts: HashMap<PublishedFileId, DownloadOutcome>,
     fallback: DownloadOutcome,
     reason: String,
+    cleanup_error: Option<String>,
+}
+impl BatchResult {
+    fn cleanup_failed(&mut self, reason: impl std::fmt::Display) {
+        self.fallback = DownloadOutcome::Unverified;
+        let message = self.cleanup_error.get_or_insert_with(String::new);
+        if !message.is_empty() {
+            message.push_str("; ");
+        }
+        message.push_str(&reason.to_string());
+    }
 }
 enum StreamEvent {
     Line(String),
     Fault(String),
+    InvalidOutput(String),
     Done,
 }
 struct OwnedProcess(Option<GroupChild>);
@@ -346,17 +404,29 @@ fn run_batch(
     let stdout = child.inner().stdout.take().expect("piped stdout");
     let stderr = child.inner().stderr.take().expect("piped stderr");
     let (tx, rx) = mpsc::sync_channel(64);
-    let out = reader(stdout, tx.clone());
-    let err = reader(stderr, tx);
     let mut result = BatchResult {
         receipts: HashMap::new(),
         fallback: DownloadOutcome::Unverified,
         reason: "no matching per-item success receipt".into(),
+        cleanup_error: None,
     };
+    let mut readers = Vec::new();
+    let mut done = 0;
+    for (name, started) in [
+        ("stdout", reader(stdout, tx.clone())),
+        ("stderr", reader(stderr, tx)),
+    ] {
+        match started {
+            Ok(handle) => readers.push((name, handle)),
+            Err(error) => {
+                result.cleanup_failed(format!("{name} reader could not start: {error}"));
+                done += 1;
+            }
+        }
+    }
     let mut ended = false;
     let mut drain_deadline = None;
     let mut drain_limit = None;
-    let mut done = 0;
     let mut fault = false;
     let mut log_bytes = report.logs.iter().map(String::len).sum::<usize>();
     loop {
@@ -369,6 +439,10 @@ fn run_batch(
                     progressed = true;
                 }
                 Ok(StreamEvent::Fault(message)) => {
+                    progressed = true;
+                    result.cleanup_failed(message);
+                }
+                Ok(StreamEvent::InvalidOutput(message)) => {
                     progressed = true;
                     fault = true;
                     result.reason = message;
@@ -388,7 +462,12 @@ fn run_batch(
             }
         }
         if !ended {
-            if cancel.load(Ordering::Acquire) || Instant::now() >= deadline {
+            if result.cleanup_error.is_some() {
+                if let Err(error) = stop(child) {
+                    result.cleanup_failed(error);
+                }
+                ended = true;
+            } else if cancel.load(Ordering::Acquire) || Instant::now() >= deadline {
                 result.fallback = if cancel.load(Ordering::Acquire) {
                     DownloadOutcome::Cancelled
                 } else {
@@ -398,17 +477,27 @@ fn run_batch(
                     "SteamCMD {:?}; owned process group stopped",
                     result.fallback
                 );
-                stop(child).map_err(|e| AcquisitionError::Cleanup(e.to_string()))?;
+                if let Err(error) = stop(child) {
+                    result.cleanup_failed(error);
+                }
                 ended = true;
-            } else if let Some(status) = child
-                .try_wait()
-                .map_err(|e| AcquisitionError::Cleanup(e.to_string()))?
-            {
-                stop(child).map_err(|e| AcquisitionError::Cleanup(e.to_string()))?;
-                ended = true;
-                if !status.success() {
-                    fault = true;
-                    result.reason = format!("SteamCMD exited with {status}");
+            } else {
+                match child.try_wait() {
+                    Ok(None) => {}
+                    status => {
+                        if let Err(error) = stop(child) {
+                            result.cleanup_failed(error);
+                        }
+                        ended = true;
+                        match status {
+                            Ok(Some(status)) if !status.success() => {
+                                fault = true;
+                                result.reason = format!("SteamCMD exited with {status}");
+                            }
+                            Err(error) => result.cleanup_failed(error),
+                            _ => {}
+                        }
+                    }
                 }
             }
         }
@@ -425,8 +514,8 @@ fn run_batch(
                 drain_deadline = Some(now + grace);
             }
             if now >= *limit || drain_deadline.is_some_and(|idle| now >= idle) {
-                process.0.take();
-                return Err(AcquisitionError::Cleanup("output pipes remained open after bounded drain; an escaped descendant may still run".into()));
+                result.cleanup_failed("output pipes remained open after bounded drain; an escaped descendant may still run");
+                break;
             }
         }
         if progressed {
@@ -435,12 +524,14 @@ fn run_batch(
             thread::sleep(Duration::from_millis(5));
         }
     }
-    out.join()
-        .map_err(|_| AcquisitionError::Cleanup("stdout reader panicked".into()))?;
-    err.join()
-        .map_err(|_| AcquisitionError::Cleanup("stderr reader panicked".into()))?;
+    // A failed stop must not trigger an unbounded retry in OwnedProcess::drop.
     process.0.take();
-    if fault {
+    for (name, reader) in readers {
+        if (done == 2 || reader.is_finished()) && reader.join().is_err() {
+            result.cleanup_failed(format!("{name} reader panicked"));
+        }
+    }
+    if fault && result.cleanup_error.is_none() {
         result.receipts.retain(|_, v| *v == DownloadOutcome::Failed);
     }
     Ok(result)
@@ -450,6 +541,10 @@ fn receipt(
     ids: &[PublishedFileId],
     receipts: &mut HashMap<PublishedFileId, DownloadOutcome>,
 ) {
+    if line.len() > MAX_LINE {
+        return;
+    }
+    let line = without_sgr(line);
     let parsed = if let Some(rest) = line.strip_prefix("Success. Downloaded item ") {
         rest.split_once(" to ")
             .map(|(id, _)| (id, DownloadOutcome::Succeeded))
@@ -473,11 +568,40 @@ fn receipt(
             .or_insert(outcome);
     }
 }
+// Only SGR is transparent to receipt matching; other terminal controls are preserved.
+// Call after the raw line limit, and keep raw diagnostics unchanged.
+fn without_sgr(line: &str) -> String {
+    let bytes = line.as_bytes();
+    let mut normalized = String::with_capacity(line.len());
+    let mut start = 0;
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        if bytes[cursor] == b'\x1b' && bytes.get(cursor + 1) == Some(&b'[') {
+            let mut end = cursor + 2;
+            while bytes
+                .get(end)
+                .is_some_and(|byte| byte.is_ascii_digit() || matches!(byte, b';' | b':'))
+            {
+                end += 1;
+            }
+            if bytes.get(end) == Some(&b'm') {
+                normalized.push_str(&line[start..cursor]);
+                cursor = end + 1;
+                start = cursor;
+                continue;
+            }
+        }
+        cursor += 1;
+    }
+    normalized.push_str(&line[start..]);
+    normalized
+}
+
 fn reader(
     mut stream: impl Read + Send + 'static,
     tx: SyncSender<StreamEvent>,
-) -> thread::JoinHandle<()> {
-    thread::spawn(move || {
+) -> std::io::Result<thread::JoinHandle<()>> {
+    thread::Builder::new().spawn(move || {
         let mut buffer = [0; 4096];
         let mut line = Vec::new();
         let mut oversized = false;
@@ -502,7 +626,7 @@ fn reader(
                         oversized = true;
                         line.clear();
                         if tx
-                            .send(StreamEvent::Fault(
+                            .send(StreamEvent::InvalidOutput(
                                 "SteamCMD log line exceeds 8192 bytes".into(),
                             ))
                             .is_err()
@@ -527,6 +651,8 @@ fn send_line(
 ) -> Result<(), mpsc::SendError<StreamEvent>> {
     match std::str::from_utf8(bytes) {
         Ok(line) => tx.send(StreamEvent::Line(line.trim_end_matches('\r').to_string())),
-        Err(_) => tx.send(StreamEvent::Fault("SteamCMD output is not UTF-8".into())),
+        Err(_) => tx.send(StreamEvent::InvalidOutput(
+            "SteamCMD output is not UTF-8".into(),
+        )),
     }
 }

@@ -131,15 +131,30 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Acquisiti
     }
     serde_json::from_slice(&bytes).map_err(|e| refuse(format!("{}: {e}", path.display())))
 }
+fn bounded_json(value: &impl Serialize) -> Result<Vec<u8>, AcquisitionError> {
+    struct Buffer(Vec<u8>);
+    impl Write for Buffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if bytes.len() > MAX_STATE as usize - self.0.len() {
+                return Err(std::io::Error::other("state exceeds 4 MiB"));
+            }
+            self.0.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut buffer = Buffer(Vec::new());
+    serde_json::to_writer(&mut buffer, value).map_err(|e| refuse(e.to_string()))?;
+    Ok(buffer.0)
+}
 fn atomic_json(path: &Path, value: &impl Serialize) -> Result<(), AcquisitionError> {
     no_links(path)?;
     let parent = path.parent().ok_or_else(|| refuse("state has no parent"))?;
     let mut file = tempfile::NamedTempFile::new_in(parent)?;
-    serde_json::to_writer(&mut file, value).map_err(|e| refuse(e.to_string()))?;
+    file.write_all(&bounded_json(value)?)?;
     file.flush()?;
-    if file.as_file().metadata()?.len() > MAX_STATE {
-        return Err(refuse("state exceeds 4 MiB"));
-    }
     file.as_file().sync_all()?;
     file.persist(path)
         .map_err(|e| AcquisitionError::Io(e.error))?;
@@ -315,6 +330,9 @@ impl Installer {
             backup,
             phase: Phase::Prepared,
         };
+        let mut candidate = self.manifest.clone();
+        candidate.records.insert(id, journal.new.clone());
+        bounded_json(&candidate)?;
         self.save_journal(&journal)?;
         let _ = stage.keep();
         Ok(journal)
