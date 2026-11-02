@@ -4,4 +4,5 @@ pub mod config;
 pub mod launch;
 pub mod scan;
 pub mod settings;
+pub mod steam_client;
 pub mod xml;
