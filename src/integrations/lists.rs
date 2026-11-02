@@ -5,7 +5,7 @@ use std::{
     collections::HashSet,
     fs,
     io::{Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,18 +103,105 @@ pub fn append_unique(current: &[String], incoming: &[String]) -> Vec<String> {
     }
     result
 }
-/// Refuses lexical and canonical aliases of the bound game config before atomic export.
+// Resolve parents even when the leaf is absent. Never re-follow the caller's
+// directory-link spelling when creating the temporary file or persisting it.
+fn export_destination(path: &Path) -> Result<(PathBuf, bool), ListError> {
+    let name = path.file_name().ok_or_else(|| error("missing file name"))?;
+    #[cfg(windows)]
+    {
+        let name = name
+            .to_str()
+            .ok_or_else(|| error("ambiguous Windows file name"))?;
+        let stem = name
+            .split('.')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_uppercase();
+        if name.ends_with(['.', ' '])
+            || name
+                .chars()
+                .any(|c| c.is_control() || "<>:\"/\\|?*".contains(c))
+            || matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+            || ((stem.starts_with("COM") || stem.starts_with("LPT"))
+                && stem.len() == 4
+                && stem.as_bytes()[3].is_ascii_digit())
+        {
+            return Err(error("ambiguous Windows file name"));
+        }
+    }
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let destination = fs::canonicalize(parent).map_err(error)?.join(name);
+    let exists = match fs::symlink_metadata(&destination) {
+        Ok(metadata) if metadata.is_file() => true,
+        Ok(_) => {
+            return Err(error(
+                "export identities must be regular files, not links or directories",
+            ));
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => return Err(error(e)),
+    };
+    Ok((destination, exists))
+}
+
+fn same_export_name(first: &Path, second: &Path) -> Result<bool, ListError> {
+    let first = first
+        .file_name()
+        .ok_or_else(|| error("missing file name"))?;
+    let second = second
+        .file_name()
+        .ok_or_else(|| error("missing file name"))?;
+    #[cfg(any(windows, target_os = "macos"))]
+    {
+        // Missing files have no OS identity to compare. Do not guess at Unicode
+        // case/normalization aliases on case-insensitive filesystems.
+        let first = first.to_str().filter(|s| s.is_ascii());
+        let second = second.to_str().filter(|s| s.is_ascii());
+        match (first, second) {
+            (Some(first), Some(second)) => {
+                if cfg!(windows) && (first.contains('~') || second.contains('~')) {
+                    return Err(error("cannot prove distinct missing Windows short names"));
+                }
+                Ok(first.eq_ignore_ascii_case(second))
+            }
+            _ => Err(error("cannot prove distinct missing-file names")),
+        }
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    Ok(first == second)
+}
+
+/// Refuses file identities and missing-file parent/name aliases of the game config.
+/// Unresolvable parents and final-file links fail closed; safe exports still work
+/// when the configured file is absent. Writes use the resolved destination.
+/// Missing-file names in the same directory must have provably distinct identities:
+/// Windows/macOS refuse non-ASCII ambiguity, and Windows also refuses short names.
 pub fn export_file(
     path: &Path,
     game_config: &Path,
     doc: &ModListDocument,
     json: bool,
 ) -> Result<(), ListError> {
-    if path == game_config
-        || (path.exists()
-            && fs::canonicalize(path).map_err(error)?
-                == fs::canonicalize(game_config).map_err(error)?)
-    {
+    let (destination, destination_exists) = export_destination(path)?;
+    let (protected, protected_exists) = export_destination(game_config)?;
+    let same = if destination_exists && protected_exists {
+        same_file::is_same_file(&destination, &protected).map_err(error)?
+    } else {
+        same_file::is_same_file(
+            destination
+                .parent()
+                .ok_or_else(|| error("missing destination directory"))?,
+            protected
+                .parent()
+                .ok_or_else(|| error("missing game directory"))?,
+        )
+        .map_err(error)?
+            && same_export_name(&destination, &protected)?
+    };
+    if same {
         return Err(error(
             "export cannot overwrite the game config; use Apply to game",
         ));
@@ -124,12 +211,12 @@ pub fn export_file(
     } else {
         export_xml(doc)?
     };
-    let parent = path
+    let parent = destination
         .parent()
         .ok_or_else(|| error("missing destination directory"))?;
     let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(error)?;
     temp.write_all(&bytes).map_err(error)?;
     temp.as_file().sync_all().map_err(error)?;
-    temp.persist(path).map_err(error)?;
+    temp.persist(&destination).map_err(error)?;
     Ok(())
 }

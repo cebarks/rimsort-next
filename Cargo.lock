@@ -3706,6 +3706,7 @@ dependencies = [
  "directories",
  "i-slint-backend-testing",
  "quick-xml",
+ "same-file",
  "serde",
  "serde_json",
  "slint",
