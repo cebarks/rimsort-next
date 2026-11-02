@@ -3,7 +3,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 fn invoke(args: &[&str], input: &[u8]) -> std::process::Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_steam-helper"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rimsort-next-steam"))
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -34,7 +34,7 @@ fn version_needs_no_request_or_sdk_initialization() {
     assert!(
         String::from_utf8(output.stdout)
             .unwrap()
-            .starts_with("steam-helper 0.1.0 protocol=1")
+            .starts_with("rimsort-next-steam 0.1.0 protocol=1")
     );
     assert!(output.stderr.is_empty());
 }
@@ -61,6 +61,6 @@ fn invalid_inputs_are_rejected_before_initialization() {
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()
-            .starts_with("usage:")
+            .starts_with("usage: rimsort-next-steam ")
     );
 }

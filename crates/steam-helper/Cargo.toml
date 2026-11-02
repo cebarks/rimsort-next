@@ -3,6 +3,10 @@ name = "steam-helper"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "rimsort-next-steam"
+path = "src/main.rs"
+
 [dependencies]
 steam-protocol = { path = "../steam-protocol" }
 steamworks = "=0.13.1"

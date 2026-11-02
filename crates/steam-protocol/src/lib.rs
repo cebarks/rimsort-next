@@ -137,6 +137,71 @@ pub enum Outcome {
     Unknown,
 }
 
+pub const MAX_FAILURE_MESSAGE: usize = 512;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureStage {
+    Initialize,
+    Verify,
+    Request,
+    Complete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureKind {
+    InitializationFailed,
+    MetadataQueryFailed,
+    InvalidItemIdentity,
+    RequestRejected,
+    NativeFailure,
+    TimedOut,
+    UnverifiedInstall,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FailureDetail {
+    pub stage: FailureStage,
+    pub kind: FailureKind,
+    pub message: String,
+}
+impl FailureDetail {
+    pub fn new(stage: FailureStage, kind: FailureKind, message: &str) -> Self {
+        let mut bounded = String::with_capacity(message.len().min(MAX_FAILURE_MESSAGE));
+        for ch in message.chars() {
+            let ch = if invalid_message_char(ch) { ' ' } else { ch };
+            if bounded.len() + ch.len_utf8() > MAX_FAILURE_MESSAGE {
+                break;
+            }
+            bounded.push(ch);
+        }
+        if bounded.is_empty() {
+            bounded.push_str("No diagnostic available");
+        }
+        Self {
+            stage,
+            kind,
+            message: bounded,
+        }
+    }
+
+    fn validate(&self) -> Result<(), ProtocolError> {
+        if self.message.is_empty()
+            || self.message.len() > MAX_FAILURE_MESSAGE
+            || self.message.chars().any(invalid_message_char)
+        {
+            return Err(ProtocolError("invalid failure message"));
+        }
+        Ok(())
+    }
+}
+
+fn invalid_message_char(ch: char) -> bool {
+    ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}')
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Payload {
@@ -148,6 +213,7 @@ pub enum Payload {
     Outcome {
         item_id: u64,
         outcome: Outcome,
+        detail: Option<FailureDetail>,
     },
     Terminal,
 }
@@ -252,7 +318,17 @@ impl EventStream {
                 };
                 self.advance(*item_id, expected)?;
             }
-            Payload::Outcome { item_id, outcome } => {
+            Payload::Outcome {
+                item_id,
+                outcome,
+                detail,
+            } => {
+                if matches!(outcome, Outcome::Failed | Outcome::Unknown) != detail.is_some() {
+                    return Err(ProtocolError("missing or forbidden failure detail"));
+                }
+                if let Some(detail) = detail {
+                    detail.validate()?;
+                }
                 let compatible = match outcome {
                     Outcome::Observed => self.request.action == Action::Inspect,
                     Outcome::Acknowledged => matches!(self.request.action, Action::Subscribe | Action::Unsubscribe),

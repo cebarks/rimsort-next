@@ -2,7 +2,9 @@
 
 This is a separate executable, not GUI integration. The main package has no
 Steamworks dependency; the workspace defaults to the main package. Only explicit
-workspace builds or `-p steam-helper` build the helper. Phase B must add process
+workspace builds or `-p steam-helper` build the helper. The canonical binary is
+`rimsort-next-steam` (`rimsort-next-steam.exe` on Windows); the package/library
+remain `steam-helper`/`steam_helper`. Phase B must add process
 supervision, cancellation, queue/UI wiring and the game-running interlock.
 
 ## Safety and wire contract
@@ -39,6 +41,31 @@ duplicates, outcome/action compatibility, install paths and the final terminal.
 `read_line_bounded` bounds allocation even for diagnostic text. Non-prefixed
 native diagnostics are not events. Consumers must also bound total diagnostics
 and wall time; endlessly repeated short diagnostics are not bounded by line size.
+
+Outcome payloads carry `item_id`, `outcome` and `detail`. Failed and unknown
+outcomes require a structured failure detail; observed, acknowledged and installed
+outcomes must not carry one (`null` or omitted). Schema remains 1; no GUI consumes
+this unreleased contract yet. Detail fields are strictly `stage`, `kind`, `message`:
+
+| Stage | Kind | Meaning |
+| --- | --- | --- |
+| `initialize` | `initialization_failed` | Client initialization failed; correlated to each requested item |
+| `verify` | `metadata_query_failed` | Query creation/completion failed, or metadata was missing/unusable |
+| `verify` | `invalid_item_identity` | Returned item ID, app or permitted community-file identity did not match |
+| `request` | `request_rejected` | The native operation did not accept the start request |
+| `complete` | `native_failure` | SDK completion reported an error |
+| `verify` / `complete` | `timed_out` | Verification or operation completion is still unknown after the deadline |
+| `complete` | `unverified_install` | Successful download callback without a current installation observation |
+
+Messages are nonempty, single-line and at most 512 UTF-8 bytes. Producers replace
+control characters (also Unicode line/paragraph separators) with spaces, truncate
+only at character boundaries, and supply a fallback for an empty diagnostic.
+The decoder rejects empty, oversized or control/multiline-bearing messages rather
+than repairing them. Native SDK error text is preserved within those bounds where
+the safe binding exposes it. `QueryResults::get` hides per-row errors as `None`, so
+those cases report a missing/unusable metadata response, not an invented SDK cause.
+Details never overwrite observations, turn an unknown into retry permission, or
+convert acknowledgement into proof of installed game-visible content.
 
 Already accepted events remain accessible after EOF without a terminal. Preserve
 those facts, mark unfinished operations unknown, and inspect before any retry.
@@ -87,7 +114,7 @@ uses only std, serde and serde_json; no SDK, Slint, async runtime or process API
 ```sh
 CARGO_BUILD_JOBS=4 cargo test --locked -p steam-protocol -p steam-helper
 CARGO_BUILD_JOBS=4 cargo build --locked -p steam-helper
-cargo run --locked -p steam-helper -- --version
+CARGO_BUILD_JOBS=4 cargo run --locked -p steam-helper --bin rimsort-next-steam -- --version
 ```
 
 Tests use fake APIs and only version/invalid-input child invocations. They must
@@ -120,7 +147,8 @@ Verified against the published 0.13.0 source and local build-script output:
   failure, not SDK initialization. Phase B must handle this like a missing helper.
   The main executable's dependency graph and native linkage exclude Steamworks.
 
-Linux verification for this phase: `readelf -d` shows the helper needs
+Linux verification for this phase: `readelf -d target/debug/rimsort-next-steam`
+shows the newly named helper needs
 `libsteam_api.so` and has only `$ORIGIN` RUNPATH, with no builder-cache path baked
 in. The main binary has no Steam native dependency. Without a runtime search
 path, helper `--version` exits 127 at the loader; with `LD_LIBRARY_PATH` set to the
@@ -151,8 +179,9 @@ proof are still outstanding, not implied by successful compilation.
 
 ## Phase B integration obligations
 
-Use a configured absolute helper path or the expected sibling executable, never a
-shell/PATH search or executable supplied by a mod. Own the helper process group;
+Use a configured absolute helper path or the sibling `rimsort-next-steam`
+(`rimsort-next-steam.exe` on Windows), never a shell/PATH search or executable
+supplied by a mod. Do not fall back to the old `steam-helper` artifact name. Own the helper process group;
 on cancel terminate that group, preserve all validated facts, mark unfinished
 items unknown, and inspect before retry. Enforce a wall-clock deadline covering
 spawn/input/init/output in addition to the helper's post-init timer. Bound total

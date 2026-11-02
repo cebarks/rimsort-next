@@ -4,7 +4,10 @@ use std::{
     sync::mpsc::{self, Receiver, SyncSender},
 };
 use steam_helper::{ApiError, Callback, Identity, SteamApi};
-use steam_protocol::{APP_ID, Action, Facts, Freshness, Install, MAX_ITEMS, Request, Subscription};
+use steam_protocol::{
+    APP_ID, Action, Facts, FailureKind, FailureStage, Freshness, Install, MAX_ITEMS, Request,
+    Subscription,
+};
 use steamworks::{
     AppId, CallbackHandle, Client, DownloadItemResult, FileType, ItemState, PublishedFileId,
 };
@@ -17,9 +20,21 @@ pub struct Native {
     receiver: Receiver<Callback>,
 }
 impl Native {
-    pub fn initialize(request: &Request) -> Result<Self, String> {
-        request.validate().map_err(|e| e.to_string())?;
-        let client = Client::init_app(AppId(APP_ID)).map_err(|e| e.to_string())?;
+    pub fn initialize(request: &Request) -> Result<Self, ApiError> {
+        request.validate().map_err(|error| {
+            ApiError::new(
+                FailureStage::Initialize,
+                FailureKind::InitializationFailed,
+                &error.to_string(),
+            )
+        })?;
+        let client = Client::init_app(AppId(APP_ID)).map_err(|error| {
+            ApiError::new(
+                FailureStage::Initialize,
+                FailureKind::InitializationFailed,
+                &error.to_string(),
+            )
+        })?;
         let (sender, receiver) = mpsc::sync_channel(MAX_ITEMS * 2);
         let tx = sender.clone();
         let ids: BTreeSet<_> = request.ids.iter().copied().collect();
@@ -35,7 +50,13 @@ impl Native {
                     action,
                     app_id: event.app_id.0,
                     item_id: event.published_file_id.0,
-                    success: event.error.is_none(),
+                    result: event.error.map_or(Ok(()), |error| {
+                        Err(ApiError::new(
+                            FailureStage::Complete,
+                            FailureKind::NativeFailure,
+                            &error.to_string(),
+                        ))
+                    }),
                 });
             }
         });
@@ -53,22 +74,50 @@ impl SteamApi for Native {
         self.client
             .ugc()
             .query_item(PublishedFileId(item_id))
-            .map_err(|_| ApiError)?
+            .map_err(|error| {
+                ApiError::new(
+                    FailureStage::Verify,
+                    FailureKind::MetadataQueryFailed,
+                    &error.to_string(),
+                )
+            })?
             .fetch(move |result| {
                 let identity = result
-                    .ok()
+                    .map_err(|error| {
+                        ApiError::new(
+                            FailureStage::Verify,
+                            FailureKind::MetadataQueryFailed,
+                            &error.to_string(),
+                        )
+                    })
                     .and_then(|rows| {
                         if rows.returned_results() != 1 {
-                            return None;
+                            return Err(ApiError::new(
+                                FailureStage::Verify,
+                                FailureKind::MetadataQueryFailed,
+                                "Metadata query did not return exactly one item",
+                            ));
                         }
-                        rows.get(0)
-                            .filter(|row| row.published_file_id.0 == item_id)
-                            .map(|row| Identity {
-                                app_id: row.consumer_app_id.map_or(0, |app| app.0),
-                                community: row.file_type == FileType::Community && !row.banned,
-                            })
-                    })
-                    .ok_or(ApiError);
+                        // The safe binding hides per-row SDK errors behind None.
+                        let row = rows.get(0).ok_or_else(|| {
+                            ApiError::new(
+                                FailureStage::Verify,
+                                FailureKind::MetadataQueryFailed,
+                                "Metadata response is missing or unusable",
+                            )
+                        })?;
+                        if row.published_file_id.0 != item_id {
+                            return Err(ApiError::new(
+                                FailureStage::Verify,
+                                FailureKind::InvalidItemIdentity,
+                                "Metadata response has a different item ID",
+                            ));
+                        }
+                        Ok(Identity {
+                            app_id: row.consumer_app_id.map_or(0, |app| app.0),
+                            community: row.file_type == FileType::Community && !row.banned,
+                        })
+                    });
                 let _ = tx.try_send(Callback::Verified {
                     item_id,
                     result: identity,
@@ -126,7 +175,13 @@ impl SteamApi for Native {
                         action,
                         app_id: APP_ID,
                         item_id,
-                        success: result.is_ok(),
+                        result: result.map_err(|error| {
+                            ApiError::new(
+                                FailureStage::Complete,
+                                FailureKind::NativeFailure,
+                                &error.to_string(),
+                            )
+                        }),
                     });
                 };
                 // steamworks retains each call-result closure in Client's inner registry.
@@ -141,10 +196,18 @@ impl SteamApi for Native {
                 if ugc.download_item(id, false) {
                     Ok(())
                 } else {
-                    Err(ApiError)
+                    Err(ApiError::new(
+                        FailureStage::Request,
+                        FailureKind::RequestRejected,
+                        "Steam rejected the download request",
+                    ))
                 }
             }
-            Action::Inspect => Err(ApiError),
+            Action::Inspect => Err(ApiError::new(
+                FailureStage::Request,
+                FailureKind::RequestRejected,
+                "Inspect does not start a native operation",
+            )),
         }
     }
     fn pump(&mut self) -> Vec<Callback> {

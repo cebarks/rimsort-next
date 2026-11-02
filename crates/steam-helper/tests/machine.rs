@@ -11,18 +11,32 @@ struct Fake {
     subscription: Option<Subscription>,
     fresh: bool,
     reject: bool,
+    reject_query: bool,
     pumps: usize,
 }
 impl SteamApi for Fake {
     fn query(&mut self, id: u64) -> Result<(), ApiError> {
         self.queries.push(id);
-        Ok(())
+        if self.reject_query {
+            Err(ApiError::new(
+                FailureStage::Verify,
+                FailureKind::MetadataQueryFailed,
+                "Could not create workshop query",
+            ))
+        } else {
+            Ok(())
+        }
     }
     fn observe(&self, _: u64) -> Facts {
         Facts {
             subscription: self.subscription.unwrap_or(Subscription::Subscribed),
             install: self.old_copy.then(|| Install {
-                path: "/fixture/old-mod".into(),
+                path: std::env::current_dir()
+                    .unwrap()
+                    .join("fixture/old-mod")
+                    .to_str()
+                    .unwrap()
+                    .into(),
                 size_bytes: 100,
                 timestamp: 1,
                 freshness: if self.fresh {
@@ -35,7 +49,15 @@ impl SteamApi for Fake {
     }
     fn start(&mut self, action: Action, id: u64) -> Result<(), ApiError> {
         self.mutations.push((action, id));
-        if self.reject { Err(ApiError) } else { Ok(()) }
+        if self.reject {
+            Err(ApiError::new(
+                FailureStage::Request,
+                FailureKind::RequestRejected,
+                "Steam rejected the download request",
+            ))
+        } else {
+            Ok(())
+        }
     }
     fn pump(&mut self) -> Vec<Callback> {
         self.pumps += 1;
@@ -62,7 +84,15 @@ fn completed(action: Action, app_id: u32, item_id: u64, success: bool) -> Callba
         action,
         app_id,
         item_id,
-        success,
+        result: if success {
+            Ok(())
+        } else {
+            Err(ApiError::new(
+                FailureStage::Complete,
+                FailureKind::NativeFailure,
+                "Access denied",
+            ))
+        },
     }
 }
 fn outcomes(events: &[Event]) -> Vec<Outcome> {
@@ -80,6 +110,32 @@ fn outcomes(events: &[Event]) -> Vec<Outcome> {
 fn drive(action: Action, mut fake: Fake) -> (Machine, Fake) {
     let machine = Machine::new(request(action), &mut fake).unwrap();
     (machine, fake)
+}
+
+fn assert_failure(events: &[Event], outcome: Outcome, stage: &str, kind: &str) {
+    assert_eq!(outcomes(events), [outcome]);
+    let event = events
+        .iter()
+        .find(|e| matches!(e.payload, Payload::Outcome { .. }))
+        .unwrap();
+    let line = String::from_utf8(encode_event(event).unwrap()).unwrap();
+    assert!(
+        line.contains(&format!("\"stage\":\"{stage}\"")),
+        "missing stage: {line}"
+    );
+    assert!(
+        line.contains(&format!("\"kind\":\"{kind}\"")),
+        "missing failure kind: {line}"
+    );
+    assert!(
+        matches!(&event.payload, Payload::Outcome { item_id: 7, detail: Some(detail), .. }
+        if !detail.message.is_empty() && detail.message.len() <= 512)
+    );
+    let mut stream = EventStream::new(request(Action::Download)).unwrap();
+    for event in events {
+        stream.accept_line(&encode_event(event).unwrap()).unwrap();
+    }
+    stream.finish().unwrap();
 }
 
 #[test]
@@ -152,7 +208,12 @@ fn successful_subscription_callbacks_preserve_observed_facts_independently() {
                         facts: Facts {
                             subscription,
                             install: Some(Install {
-                                path: "/fixture/old-mod".into(),
+                                path: std::env::current_dir()
+                                    .unwrap()
+                                    .join("fixture/old-mod")
+                                    .to_str()
+                                    .unwrap()
+                                    .into(),
                                 size_bytes: 100,
                                 timestamp: 1,
                                 freshness: Freshness::NeedsUpdate,
@@ -363,7 +424,11 @@ fn immediate_rejection_and_query_failure_produce_failed_terminal_results() {
     let (mut machine, mut fake) = drive(Action::Subscribe, Fake::default());
     fake.pending.push_back(Callback::Verified {
         item_id: 7,
-        result: Err(ApiError),
+        result: Err(ApiError::new(
+            FailureStage::Verify,
+            FailureKind::MetadataQueryFailed,
+            "Metadata query unavailable",
+        )),
     });
     machine.tick(&mut fake, false);
     assert!(machine.is_done());
@@ -400,4 +465,214 @@ fn bounds_outstanding_calls_and_rejects_invalid_before_api_calls() {
     assert_eq!(fake.queries.len(), 20);
     machine.tick(&mut fake, true);
     assert_eq!(outcomes(&machine.take_events()), vec![Outcome::Unknown; 20]);
+}
+
+#[test]
+fn native_diagnostics_remain_item_correlated_and_survive_missing_terminal() {
+    for action in [Action::Subscribe, Action::Unsubscribe, Action::Download] {
+        let mut req = request(action);
+        req.ids = vec![7, 8];
+        let mut fake = Fake {
+            old_copy: true,
+            fresh: true,
+            ..Fake::default()
+        };
+        let mut machine = Machine::new(req.clone(), &mut fake).unwrap();
+        fake.pending
+            .extend([verified(7, APP_ID, true), verified(8, APP_ID, true)]);
+        machine.tick(&mut fake, false);
+        let failures = [(8, "Network failure"), (7, "Access denied")];
+        for (item_id, message) in failures {
+            fake.pending.push_back(Callback::Completed {
+                action,
+                app_id: APP_ID,
+                item_id,
+                result: Err(ApiError::new(
+                    FailureStage::Complete,
+                    FailureKind::NativeFailure,
+                    message,
+                )),
+            });
+        }
+        machine.tick(&mut fake, false);
+        let events = machine.take_events();
+        for (id, message) in failures {
+            assert!(events.iter().any(|event| matches!(&event.payload,
+                Payload::Outcome { item_id, outcome: Outcome::Failed, detail: Some(detail) }
+                    if *item_id == id && detail == &FailureDetail::new(FailureStage::Complete, FailureKind::NativeFailure, message))));
+        }
+        let mut stream = EventStream::new(req).unwrap();
+        for event in events
+            .iter()
+            .filter(|e| !matches!(e.payload, Payload::Terminal))
+        {
+            stream.accept_line(&encode_event(event).unwrap()).unwrap();
+        }
+        assert!(stream.finish().is_err());
+        assert_eq!(stream.events(), &events[..events.len() - 1]);
+        assert_eq!(fake.mutations.len(), 2);
+    }
+}
+
+#[test]
+fn verification_diagnostics_preserve_exposed_causes_without_inventing_hidden_ones() {
+    for (kind, message) in [
+        (FailureKind::MetadataQueryFailed, "Network failure"),
+        (
+            FailureKind::MetadataQueryFailed,
+            "Metadata response is missing or unusable",
+        ),
+        (
+            FailureKind::InvalidItemIdentity,
+            "Metadata response has a different item ID",
+        ),
+    ] {
+        let detail = ApiError::new(FailureStage::Verify, kind, message);
+        let (mut machine, mut fake) = drive(Action::Download, Fake::default());
+        fake.pending.push_back(Callback::Verified {
+            item_id: 7,
+            result: Err(detail.clone()),
+        });
+        machine.tick(&mut fake, false);
+        let events = machine.take_events();
+        assert!(events.iter().any(|event| matches!(&event.payload,
+            Payload::Outcome { item_id: 7, outcome: Outcome::Failed, detail: Some(actual) } if actual == &detail)));
+        assert!(fake.mutations.is_empty());
+    }
+}
+
+#[test]
+fn query_failures_have_verify_diagnostics() {
+    for immediate in [true, false] {
+        let (mut machine, mut fake) = drive(
+            Action::Download,
+            Fake {
+                reject_query: immediate,
+                ..Fake::default()
+            },
+        );
+        if !immediate {
+            fake.pending.push_back(Callback::Verified {
+                item_id: 7,
+                result: Err(ApiError::new(
+                    FailureStage::Verify,
+                    FailureKind::MetadataQueryFailed,
+                    "Metadata query unavailable",
+                )),
+            });
+            machine.tick(&mut fake, false);
+        }
+        assert!(fake.mutations.is_empty());
+        assert_failure(
+            &machine.take_events(),
+            Outcome::Failed,
+            "verify",
+            "metadata_query_failed",
+        );
+    }
+}
+
+#[test]
+fn invalid_identity_has_distinct_verify_diagnostic() {
+    for (app, community) in [(42, true), (APP_ID, false)] {
+        let (mut machine, mut fake) = drive(Action::Download, Fake::default());
+        fake.pending.push_back(verified(7, app, community));
+        machine.tick(&mut fake, false);
+        assert!(fake.mutations.is_empty());
+        assert_failure(
+            &machine.take_events(),
+            Outcome::Failed,
+            "verify",
+            "invalid_item_identity",
+        );
+    }
+}
+
+#[test]
+fn rejected_start_has_request_diagnostic_and_retains_old_copy() {
+    let (mut machine, mut fake) = drive(
+        Action::Download,
+        Fake {
+            reject: true,
+            old_copy: true,
+            ..Fake::default()
+        },
+    );
+    fake.pending.push_back(verified(7, APP_ID, true));
+    machine.tick(&mut fake, false);
+    let events = machine.take_events();
+    assert_failure(&events, Outcome::Failed, "request", "request_rejected");
+    assert!(events.iter().any(|event| matches!(&event.payload,
+        Payload::Observation { phase: Phase::After, facts, .. } if facts == &fake.observe(7))));
+}
+
+#[test]
+fn failed_callback_has_complete_diagnostic_even_with_current_copy() {
+    let (mut machine, mut fake) = drive(
+        Action::Download,
+        Fake {
+            old_copy: true,
+            fresh: true,
+            ..Fake::default()
+        },
+    );
+    fake.pending.push_back(verified(7, APP_ID, true));
+    machine.tick(&mut fake, false);
+    fake.pending
+        .push_back(completed(Action::Download, APP_ID, 7, false));
+    machine.tick(&mut fake, false);
+    let events = machine.take_events();
+    assert_failure(&events, Outcome::Failed, "complete", "native_failure");
+    assert!(events.iter().any(|event| matches!(&event.payload,
+        Payload::Observation { phase: Phase::After, facts, .. } if facts == &fake.observe(7))));
+}
+
+#[test]
+fn timeouts_identify_verify_or_complete_stage_without_retry() {
+    for running in [false, true] {
+        let (mut machine, mut fake) = drive(
+            Action::Download,
+            Fake {
+                old_copy: true,
+                fresh: true,
+                ..Fake::default()
+            },
+        );
+        if running {
+            fake.pending.push_back(verified(7, APP_ID, true));
+            machine.tick(&mut fake, false);
+        }
+        machine.tick(&mut fake, true);
+        assert_failure(
+            &machine.take_events(),
+            Outcome::Unknown,
+            if running { "complete" } else { "verify" },
+            "timed_out",
+        );
+        assert_eq!(fake.mutations.len(), usize::from(running));
+    }
+}
+
+#[test]
+fn successful_download_without_verified_current_install_has_distinct_detail() {
+    for old_copy in [false, true] {
+        let (mut machine, mut fake) = drive(
+            Action::Download,
+            Fake {
+                old_copy,
+                ..Fake::default()
+            },
+        );
+        fake.pending.push_back(verified(7, APP_ID, true));
+        machine.tick(&mut fake, false);
+        fake.pending
+            .push_back(completed(Action::Download, APP_ID, 7, true));
+        machine.tick(&mut fake, false);
+        assert_failure(
+            &machine.take_events(),
+            Outcome::Unknown,
+            "complete",
+            "unverified_install",
+        );
+    }
 }

@@ -57,6 +57,11 @@ fn outcome(id: u64) -> Event {
         Payload::Outcome {
             item_id: id,
             outcome: Outcome::Unknown,
+            detail: Some(FailureDetail::new(
+                FailureStage::Complete,
+                FailureKind::TimedOut,
+                "timed out",
+            )),
         },
     )
 }
@@ -141,6 +146,7 @@ fn subscription_ack_is_independent_of_observation_and_survives_missing_terminal(
                 Payload::Outcome {
                     item_id: 1,
                     outcome: Outcome::Acknowledged,
+                    detail: None,
                 },
             );
             for event in [&before, &after, &ack] {
@@ -188,6 +194,7 @@ fn inspect_and_download_cannot_report_subscription_acknowledgement() {
                 Payload::Outcome {
                     item_id: 1,
                     outcome: Outcome::Acknowledged,
+                    detail: None,
                 },
             );
             assert!(stream.accept_line(&line(&ack)).is_err());
