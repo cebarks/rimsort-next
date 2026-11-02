@@ -26,6 +26,8 @@
 //! guards as well as the visible controls. Reset changes only the in-memory working list.
 
 slint::include_modules!();
+#[path = "profiles.rs"]
+mod profiles;
 
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -264,6 +266,7 @@ struct App {
     copy_serial: u64,
     reset: Option<(String, JobSource)>,
     reset_serial: u64,
+    profiles: profiles::ProfileState,
     /// The job behind each outstanding operation, with the identity its result has to be fed
     /// back to. A fact's job is never released by a scan cancellation.
     save: Option<(JobId, OperationId)>,
@@ -304,6 +307,7 @@ impl App {
             copy_serial: 0,
             reset: None,
             reset_serial: 0,
+            profiles: profiles::ProfileState::default(),
             save: None,
             launch: None,
             refresh: None,
@@ -791,6 +795,7 @@ struct State {
     /// A weak handle only: a worker's notice reaches the window through it, and a window
     /// that has gone away is simply not upgraded.
     window: Weak<MainWindow>,
+    profiles_window: Weak<ProfilesWindow>,
     woken: OnceLock<()>,
 }
 
@@ -808,6 +813,7 @@ pub struct Workspace {
     /// every `Workspace` clone holds. Workers never see it: they hold only a weak reference
     /// to the state, and the state holds only a weak reference to the window.
     window: Rc<MainWindow>,
+    profiles_window: Rc<ProfilesWindow>,
     state: Arc<State>,
     weak_state: std::sync::Weak<State>,
 }
@@ -816,19 +822,23 @@ impl Workspace {
     /// Creates the window and registers its controls.
     pub fn open(startup: &Startup) -> Result<Self, slint::PlatformError> {
         let window = MainWindow::new()?;
+        let profiles_window = ProfilesWindow::new()?;
         let state = Arc::new(State {
             app: Mutex::new(App::new(startup)),
             host: JobHost::new(),
             window: window.as_weak(),
+            profiles_window: profiles_window.as_weak(),
             woken: OnceLock::new(),
         });
         let workspace = Self {
             window: Rc::new(window),
+            profiles_window: Rc::new(profiles_window),
             weak_state: Arc::downgrade(&state),
             state,
         };
         workspace.register(&workspace.window);
         workspace.register_close();
+        profiles::register(&workspace.state, &workspace.profiles_window);
         // Armed once, here, so every producer of a result reaches the same notice: the first
         // read, a re-read from the form, a save, a launch.
         workspace.arm_wakeup();
@@ -846,6 +856,11 @@ impl Workspace {
     /// properties, models and callbacks.
     pub fn with_window<T>(&self, run: impl FnOnce(&MainWindow) -> T) -> T {
         run(&self.window)
+    }
+
+    /// Runs a closure against the application's checkpoint window.
+    pub fn with_profiles<T>(&self, run: impl FnOnce(&ProfilesWindow) -> T) -> T {
+        run(&self.profiles_window)
     }
 
     /// Makes the window visible. The event loop only runs while a window is, so this is
@@ -1046,6 +1061,8 @@ impl Workspace {
     }
 
     fn register(&self, window: &MainWindow) {
+        let state = Arc::clone(&self.state);
+        window.on_open_profiles(move || profiles::open(&state));
         let state = Arc::clone(&self.state);
         window.on_inactive_searched(move |text| {
             let state = Arc::clone(&state);
@@ -1272,6 +1289,7 @@ fn state_wake(state: &Arc<State>) {
 
 /// Takes the host's notice and applies whatever has arrived. UI thread only.
 fn deliver_state(state: &Arc<State>) {
+    profiles::deliver(state);
     let (events, arrived) = {
         let mut app = state
             .app
@@ -1338,6 +1356,8 @@ fn edit(state: &Arc<State>, change: impl FnOnce(&mut App) -> bool) {
 
 fn reset_allowed(app: &App) -> bool {
     app.session.is_some()
+        && !app.profiles.busy
+        && app.profiles.delete.is_none()
         && app.prompt.is_none()
         && app.copy.is_none()
         && app.save.is_none()
@@ -1652,7 +1672,11 @@ fn request(state: &Arc<State>, kind: RequestKind) {
 /// governs this operation while an operation already running keeps the value it captured; a
 /// re-read uses the installed candidate unless the form explicitly named another.
 fn request_with(state: &Arc<State>, kind: RequestKind, refresh: Option<RefreshTarget>) {
-    if state.app.lock().expect("state").reset.is_some() {
+    let blocked = {
+        let app = state.app.lock().expect("state");
+        app.reset.is_some() || app.profiles.busy || app.profiles.delete.is_some()
+    };
+    if blocked {
         return;
     }
     let (confirm, target) = {
@@ -1692,10 +1716,7 @@ fn answer(state: &Arc<State>, token: &str, choice: &str) {
             .filter(|prompt| prompt.token == token)
             .cloned()
         {
-            Some(prompt) => {
-                app.prompt = None;
-                Some(prompt)
-            }
+            Some(prompt) => Some(prompt),
             None => {
                 app.status = "that question has already been answered or replaced".to_string();
                 None
@@ -1716,7 +1737,6 @@ fn answer(state: &Arc<State>, token: &str, choice: &str) {
         _ => None,
     }) else {
         let mut app = state.app.lock().expect("state");
-        app.prompt = Some(prompt);
         app.status = "that is not one of the answers this question offers".to_string();
         let view = app.view();
         drop(app);
@@ -1734,7 +1754,11 @@ fn answer(state: &Arc<State>, token: &str, choice: &str) {
 
 /// Whether a close request may take the window away.
 fn close_allowed(state: &Arc<State>) -> bool {
-    if state.app.lock().expect("state").reset.is_some() {
+    let blocked = {
+        let app = state.app.lock().expect("state");
+        app.reset.is_some() || app.profiles.busy || app.profiles.delete.is_some()
+    };
+    if blocked {
         return false;
     }
     {
@@ -1769,7 +1793,6 @@ fn close_allowed(state: &Arc<State>) -> bool {
     {
         let mut app = state.app.lock().expect("state");
         app.close_effect = false;
-        app.closing = true;
     }
     reduce(
         state,
@@ -1781,6 +1804,9 @@ fn close_allowed(state: &Arc<State>) -> bool {
 }
 
 fn hide(state: &Arc<State>) {
+    if let Some(window) = state.profiles_window.upgrade() {
+        let _ = window.hide();
+    }
     if let Some(window) = state.window.upgrade() {
         let _ = window.hide();
     }
@@ -1797,6 +1823,7 @@ fn reduce(state: &Arc<State>, events: Vec<WorkflowEvent>) {
             session,
             workflow,
             status,
+            prompt,
             ..
         } = &mut *app;
         let (Some(session), Some(workflow)) = (session.as_mut(), workflow.as_mut()) else {
@@ -1810,6 +1837,16 @@ fn reduce(state: &Arc<State>, events: Vec<WorkflowEvent>) {
         for event in events {
             collected.extend(workflow.reduce(session, event));
         }
+        if prompt
+            .as_ref()
+            .is_some_and(|prompt| !workflow.owns_prompt(prompt.id))
+        {
+            *prompt = None;
+        }
+        app.closing = workflow.has_pending_close()
+            || collected
+                .iter()
+                .any(|effect| matches!(effect, WorkflowEffect::Close));
         apply_effects(state, &mut app, collected);
     }
     let (view, close_out) = {
@@ -1834,6 +1871,24 @@ fn reduce(state: &Arc<State>, events: Vec<WorkflowEvent>) {
 fn apply_effects(state: &State, app: &mut App, effects: Vec<WorkflowEffect>) {
     for effect in effects {
         match effect {
+            WorkflowEffect::PromptUnsavedReplace { prompt, .. } => {
+                app.prompt = Some(Prompt::ask(
+                    prompt,
+                    "Replace unapplied game changes?",
+                    "Apply to game and continue, continue without applying, or cancel. No checkpoint is changed.",
+                    true,
+                    true,
+                    false,
+                ));
+            }
+            WorkflowEffect::InstallReplacement { tokens, source } => {
+                if let Some(session) = app.session.as_mut() {
+                    let _ = session.replace_tokens(&tokens);
+                    let _ = app.jobs.cancel(JobSlot::Sort);
+                    app.selected = None;
+                    app.status = format!("Loaded {source}; game config unchanged by loading");
+                }
+            }
             WorkflowEffect::PromptUnsavedLaunch {
                 prompt,
                 operation: _,
@@ -1952,9 +2007,8 @@ fn apply_effects(state: &State, app: &mut App, effects: Vec<WorkflowEffect>) {
             WorkflowEffect::ReportFailure { operation, message } => {
                 app.status = format!("{}: {message}", operation.word());
                 app.reported = true;
-                app.save = None;
-                app.launch = None;
-                app.refresh = None;
+                // A refused request is not the running job's completion. Its receipt
+                // remains owned until apply_delivered consumes the matching result.
             }
             WorkflowEffect::Close => {
                 app.close_effect = true;
@@ -2082,6 +2136,9 @@ fn install(app: &mut App, replacement: RefreshReplacement, bootstrap: bool) {
             .to_string();
         return;
     };
+    if app.profiles.seed.is_none() {
+        app.profiles.seed = Some(config.active_tokens.clone());
+    }
     let session = Session::new(catalog, config, path.to_path_buf(), target_version);
     let workflow = Workflow::new(&origin.settings, app.platform, basis);
     app.target = RefreshTarget {

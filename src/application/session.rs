@@ -224,6 +224,31 @@ impl Session {
         &self.working
     }
 
+    /// Exact serializable activation tokens, including unknown and qualified entries.
+    #[must_use]
+    pub fn working_tokens(&self) -> Vec<String> {
+        self.working
+            .iter()
+            .map(|entry| entry.original_token().to_string())
+            .collect()
+    }
+
+    /// Replaces only the editor list, resolving every token without dropping placeholders.
+    /// The loaded game baseline and configuration bytes are deliberately unchanged.
+    pub fn replace_tokens(&mut self, tokens: &[String]) -> Result<bool, EditError> {
+        let entries: Vec<_> = tokens
+            .iter()
+            .map(|token| self.catalog.resolve_token(token))
+            .collect();
+        if entries == self.working {
+            return Ok(false);
+        }
+        self.working = entries;
+        self.provenance = tokens.to_vec();
+        self.revision += 1;
+        Ok(true)
+    }
+
     /// Bumped by every effective change, never by a refused or no-op command.
     #[must_use]
     pub fn revision(&self) -> u64 {

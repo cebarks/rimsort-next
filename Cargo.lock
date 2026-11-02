@@ -3702,9 +3702,11 @@ dependencies = [
 name = "rimsort-rust"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "directories",
  "i-slint-backend-testing",
  "quick-xml",
+ "same-file",
  "serde",
  "serde_json",
  "slint",

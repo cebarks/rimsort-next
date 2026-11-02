@@ -2,6 +2,8 @@
 
 pub mod config;
 pub mod launch;
+pub mod lists;
+pub mod profiles;
 pub mod scan;
 pub mod settings;
 pub mod xml;
