@@ -73,6 +73,8 @@ pub enum IssueCategory {
     DuplicateInstalledCopies,
     /// A declared load-before or load-after order is violated by the list.
     LoadOrderViolation,
+    CommunityRule,
+    CommunityConflict,
 }
 
 impl IssueCategory {
@@ -84,7 +86,8 @@ impl IssueCategory {
         match self {
             // Identity problems make the list itself unusable for sorting, so
             // they are not something a warning acknowledgement can wave away.
-            Self::MissingRecord
+            Self::CommunityConflict
+            | Self::MissingRecord
             | Self::InvalidRecord
             | Self::RepeatedEntry
             | Self::AmbiguousActivePackage => IssueSeverity::Error,
@@ -97,7 +100,8 @@ impl IssueCategory {
             | Self::UnsupportedGameVersion
             | Self::UnknownSupportedVersions
             | Self::DuplicateInstalledCopies
-            | Self::LoadOrderViolation => IssueSeverity::Warning,
+            | Self::LoadOrderViolation
+            | Self::CommunityRule => IssueSeverity::Warning,
         }
     }
 }
@@ -117,6 +121,8 @@ impl std::fmt::Display for IssueCategory {
             Self::UnknownSupportedVersions => "unknown supported versions",
             Self::DuplicateInstalledCopies => "duplicate installed copies",
             Self::LoadOrderViolation => "load order violation",
+            Self::CommunityRule => "community rule",
+            Self::CommunityConflict => "community rule conflict",
         };
         formatter.write_str(text)
     }
@@ -250,6 +256,55 @@ impl ActiveProviders {
 /// pass over the list with the [`ActiveProviders`] index and one small identity
 /// table built up front, so nothing is compared against every other entry and no
 /// cycle is enumerated.
+#[must_use]
+pub fn validate_with_rules(
+    catalog: &Catalog,
+    active: &[ActiveEntry],
+    version: &GameVersion,
+    rules: &crate::domain::rules::Ruleset,
+) -> Vec<Issue> {
+    let mut issues = validate(catalog, active, version);
+    for (position, entry) in active.iter().enumerate() {
+        if let Some(record) = usable_record(catalog, entry)
+            && record.source == crate::domain::types::Source::Official
+            && let Some(rule) = record
+                .parsed
+                .package_id
+                .as_ref()
+                .and_then(|id| rules.get(id))
+            && (rule.top() || rule.bottom())
+        {
+            issues.push(Issue {
+                category: IssueCategory::CommunityRule,
+                positions: vec![position],
+                mod_ids: vec![record.id.clone()],
+                tokens: vec![entry.original_token().into()],
+                message: "community top/bottom flags ignored for official content".into(),
+            });
+        }
+    }
+    if !rules.rules.is_empty() {
+        let finding = match crate::domain::sorting::sort_active_with_rules(catalog, active, rules) {
+            Err(error) => Some((IssueCategory::CommunityConflict, error.to_string())),
+            Ok(order) if order != active => Some((
+                IssueCategory::CommunityRule,
+                "current order differs from metadata and community rules; Sort to resolve".into(),
+            )),
+            _ => None,
+        };
+        if let Some((category, message)) = finding {
+            issues.push(Issue {
+                category,
+                positions: Vec::new(),
+                mod_ids: Vec::new(),
+                tokens: Vec::new(),
+                message,
+            });
+        }
+    }
+    issues
+}
+
 #[must_use]
 pub fn validate(catalog: &Catalog, active: &[ActiveEntry], version: &GameVersion) -> Vec<Issue> {
     let providers = ActiveProviders::build(catalog, active);

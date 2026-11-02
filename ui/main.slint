@@ -7,6 +7,7 @@
 // drag reordering is not offered.
 
 import { Button, CheckBox, LineEdit, ListView, ScrollView, GroupBox } from "std-widgets.slint";
+import { RulesPanel } from "rules.slint";
 
 export struct Row {
     key: string,
@@ -86,6 +87,16 @@ export component MainWindow inherits Window {
     in property <string> set-executable-override: "";
     in property <bool> set-confirm-warnings: false;
     in property <string> settings-note: "";
+
+    in property <bool> rules-open;
+    in property <bool> rules-enabled;
+    in property <bool> rules-updating;
+    in property <bool> rules-can-change;
+    in property <string> rules-status;
+    callback show-rules();
+    callback close-rules();
+    callback toggle-rules(bool);
+    callback update-rules();
 
     callback inactive-searched(string);
     callback active-searched(string);
@@ -212,6 +223,10 @@ export component MainWindow inherits Window {
                             text: "Sort";
                             enabled: !root.read-only && !root.busy-sort;
                             clicked => { root.sort-list(); }
+                        }
+                        Button {
+                            text: "Rules";
+                            clicked => { root.show-rules(); }
                         }
                         Button {
                             text: "Cancel sort";
@@ -505,6 +520,20 @@ export component MainWindow inherits Window {
                 }
             }
         }
+    }
+    RulesPanel {
+        visible: root.rules-open && !root.reset-open && !root.prompt-open && !root.copy-open;
+        x: (root.width - self.width) / 2;
+        y: 80px;
+        width: 660px;
+        height: 340px;
+        status: root.rules-status;
+        rules-enabled: root.rules-enabled;
+        updating: root.rules-updating;
+        can-change: root.rules-can-change;
+        toggle(value) => { root.toggle-rules(value); }
+        update => { root.update-rules(); }
+        dismiss => { root.close-rules(); }
     }
     Rectangle {
         visible: root.reset-open;

@@ -1,0 +1,33 @@
+import { Button, CheckBox, ScrollView } from "std-widgets.slint";
+
+export component RulesPanel inherits Rectangle {
+    in property <string> status;
+    in property <bool> rules-enabled;
+    in property <bool> updating;
+    in property <bool> can-change;
+    callback toggle(bool);
+    callback update();
+    callback dismiss();
+    background: #202b3e;
+    border-color: #72809a;
+    border-width: 1px;
+    border-radius: 8px;
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+        Text { text: "Community rules"; color: #e8ecf5; font-size: 20px; }
+        ScrollView {
+            Text { text: root.status; color: #e8ecf5; wrap: word-wrap; }
+        }
+        CheckBox {
+            text: "Use cached community rules when sorting";
+            checked: root.rules-enabled;
+            enabled: root.can-change;
+            toggled => { root.toggle(self.checked); }
+        }
+        HorizontalLayout {
+            Button { text: "Update rules"; enabled: root.can-change && !root.updating; clicked => { root.update(); } }
+            Button { text: "Close"; clicked => { root.dismiss(); } }
+        }
+    }
+}

@@ -7,4 +7,5 @@
 //! a thin mapping onto it.
 
 pub mod bridge;
+mod rules;
 pub mod window;

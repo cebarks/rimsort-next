@@ -25,8 +25,9 @@
 //! user-to-user edges are enforced inside their own phase, an official-to-user
 //! edge is already satisfied by the barrier, and a user-to-official edge is a
 //! contradiction the caller hears about as [`SortError::TierConflicts`] rather
-//! than a silently dropped edge. The barrier costs no edges of its own: it is two
-//! phases, not a complete bipartite graph.
+//! than a silently dropped edge. Community rules split user content into top,
+//! ordinary and bottom tiers. Every backwards cross-tier edge is refused. The
+//! barriers cost no edges of their own: four phases, not a bipartite graph.
 //!
 //! # Level order
 //!
@@ -40,6 +41,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::domain::catalog::{ActiveEntry, Catalog, UnresolvedReason};
+use crate::domain::rules::Ruleset;
 use crate::domain::types::{ModId, ModMetadata, PackageId, Source};
 use crate::domain::validation::ActiveProviders;
 
@@ -116,6 +118,8 @@ pub enum ConstraintKind {
     LoadBefore,
     /// A `loadAfter` or `forceLoadAfter` entry.
     LoadAfter,
+    CommunityBefore,
+    CommunityAfter,
 }
 
 impl std::fmt::Display for ConstraintKind {
@@ -124,6 +128,8 @@ impl std::fmt::Display for ConstraintKind {
             Self::Dependency => "dependency",
             Self::LoadBefore => "load-before",
             Self::LoadAfter => "load-after",
+            Self::CommunityBefore => "community load-before",
+            Self::CommunityAfter => "community load-after",
         };
         formatter.write_str(text)
     }
@@ -177,6 +183,8 @@ impl CycleMember {
 /// graph.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum SortError {
+    #[error("cannot sort: {message}")]
+    Community { message: String },
     /// Positions the graph refuses to use, listed in position order.
     #[error(
         "cannot sort: {}",
@@ -208,7 +216,15 @@ pub fn sort_active(
     catalog: &Catalog,
     active: &[ActiveEntry],
 ) -> Result<Vec<ActiveEntry>, SortError> {
-    match sort_with(catalog, active, &mut always_continue) {
+    sort_active_with_rules(catalog, active, &Ruleset::default())
+}
+
+pub fn sort_active_with_rules(
+    catalog: &Catalog,
+    active: &[ActiveEntry],
+    rules: &Ruleset,
+) -> Result<Vec<ActiveEntry>, SortError> {
+    match sort_with(catalog, active, rules, &mut always_continue) {
         Ok(order) => Ok(order),
         Err(Stopped::Refused(error)) => Err(error),
         // `Infallible` holds no value and `always_continue` answers "keep going" every
@@ -237,12 +253,22 @@ pub(crate) enum SortStop {
 /// level while levels are placed, so a sort stops within one position or one level of
 /// being asked to instead of only after ordering the whole list. The graph, the tiers,
 /// the level keys, the refusal reports and the order itself are unchanged.
+#[cfg(test)]
 pub(crate) fn sort_active_checked(
     catalog: &Catalog,
     active: &[ActiveEntry],
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Vec<ActiveEntry>, SortStop> {
-    match sort_with(catalog, active, &mut || {
+    sort_active_with_rules_checked(catalog, active, &Ruleset::default(), cancelled)
+}
+
+pub(crate) fn sort_active_with_rules_checked(
+    catalog: &Catalog,
+    active: &[ActiveEntry],
+    rules: &Ruleset,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Vec<ActiveEntry>, SortStop> {
+    match sort_with(catalog, active, rules, &mut || {
         if cancelled() { Err(()) } else { Ok(()) }
     }) {
         Ok(order) => Ok(order),
@@ -280,9 +306,10 @@ fn stop_at<C>(cancelled: &mut dyn FnMut() -> Result<(), C>) -> Result<(), Stoppe
 fn sort_with<C>(
     catalog: &Catalog,
     active: &[ActiveEntry],
+    rules: &Ruleset,
     cancelled: &mut dyn FnMut() -> Result<(), C>,
 ) -> Result<Vec<ActiveEntry>, Stopped<C>> {
-    let graph = Graph::build(catalog, active, cancelled)?;
+    let graph = Graph::build(catalog, active, rules, cancelled)?;
     graph.order(active, cancelled)
 }
 
@@ -290,8 +317,8 @@ fn sort_with<C>(
 struct Node<'catalog> {
     mod_id: ModId,
     package_id: PackageId,
-    /// Installed game content or a user mod: the two tiers the barrier separates.
-    official: bool,
+    /// Official, top, ordinary, bottom, in that order.
+    tier: u8,
     /// Normalised display name, falling back to the package id, then the package
     /// id and the directory identity, so no two mods in one level can tie.
     level_key: (String, PackageId, ModId),
@@ -305,6 +332,7 @@ struct Graph<'catalog> {
     /// one in-degree no matter how many metadata lists declared it.
     successors: Vec<Vec<usize>>,
     in_degree: Vec<usize>,
+    community: Vec<String>,
 }
 
 impl<'catalog> Graph<'catalog> {
@@ -317,6 +345,7 @@ impl<'catalog> Graph<'catalog> {
     fn build<C>(
         catalog: &'catalog Catalog,
         active: &[ActiveEntry],
+        rules: &Ruleset,
         cancelled: &mut dyn FnMut() -> Result<(), C>,
     ) -> Result<Self, Stopped<C>> {
         let mut nodes: Vec<Node> = Vec::with_capacity(active.len());
@@ -399,7 +428,11 @@ impl<'catalog> Graph<'catalog> {
                             Some(Node {
                                 mod_id: mod_id.clone(),
                                 package_id: package_id.clone(),
-                                official: record.source == Source::Official,
+                                tier: if record.source == Source::Official {
+                                    0
+                                } else {
+                                    2
+                                },
                                 level_key: level_key(record, package_id),
                                 record,
                             })
@@ -418,6 +451,28 @@ impl<'catalog> Graph<'catalog> {
 
         // The same provider table validation reports from: the dependency the
         // user is told about and the edge the graph draws are one decision.
+        for node in &mut nodes {
+            if let Some(rule) = rules.get(&node.package_id) {
+                if node.tier == 0 {
+                    continue;
+                }
+                if rule.top() && rule.bottom() {
+                    return Err(Stopped::Refused(SortError::Community {
+                        message: format!(
+                            "community flags for {} request both top and bottom ({:?}; {:?})",
+                            node.package_id, rule.top_comments, rule.bottom_comments
+                        ),
+                    }));
+                }
+                node.tier = if rule.top() {
+                    1
+                } else if rule.bottom() {
+                    3
+                } else {
+                    2
+                };
+            }
+        }
         let providers = ActiveProviders::build(catalog, active);
         let mut declarations: Vec<(usize, usize, ConstraintKind)> = Vec::new();
         for (position, node) in nodes.iter().enumerate() {
@@ -444,12 +499,58 @@ impl<'catalog> Graph<'catalog> {
             }
         }
 
+        let mut community = Vec::new();
+        let mut provenance = HashMap::new();
+        for (position, node) in nodes.iter().enumerate() {
+            if let Some(rule) = rules.get(&node.package_id) {
+                for (edges, kind) in [
+                    (rule.before(), ConstraintKind::CommunityBefore),
+                    (rule.after(), ConstraintKind::CommunityAfter),
+                ] {
+                    for edge in edges {
+                        if let Some(other) = providers.first(&edge.target) {
+                            let (from, to) = if kind == ConstraintKind::CommunityBefore {
+                                (position, other)
+                            } else {
+                                (other, position)
+                            };
+                            let description = format!(
+                                "{} {} {}: {}",
+                                node.package_id,
+                                kind,
+                                edge.target,
+                                edge.comments.join("; ")
+                            );
+                            community.push(description.clone());
+                            provenance.insert((from, to, kind), description);
+                            declarations.push((from, to, kind));
+                        }
+                    }
+                }
+            }
+        }
         let mut edges: HashSet<(usize, usize)> = HashSet::new();
         let mut conflicts: Vec<TierConflict> = Vec::new();
         let mut seen_conflicts: HashSet<(usize, usize, ConstraintKind)> = HashSet::new();
         for (from, to, kind) in declarations {
-            let (from_official, to_official) = (nodes[from].official, nodes[to].official);
-            if !from_official && to_official {
+            let (from_tier, to_tier) = (nodes[from].tier, nodes[to].tier);
+            if from_tier > to_tier && (to_tier != 0 || provenance.contains_key(&(from, to, kind))) {
+                return Err(Stopped::Refused(SortError::Community {
+                    message: format!(
+                        "{} ({}) must precede {} ({}) due to {}; backwards across official/top/ordinary/bottom tiers. {}",
+                        nodes[from].package_id,
+                        from_tier,
+                        nodes[to].package_id,
+                        to_tier,
+                        kind,
+                        provenance
+                            .get(&(from, to, kind))
+                            .map(String::as_str)
+                            .unwrap_or("metadata constraint conflicts with community tier flags")
+                    ),
+                }));
+            }
+            if from_tier > to_tier {
                 // The barrier puts installed game content ahead of every user mod,
                 // so this edge cannot be honored. Reporting it beats dropping it
                 // and ordering the list against its own metadata.
@@ -466,7 +567,7 @@ impl<'catalog> Graph<'catalog> {
                 if seen_conflicts.insert((from, to, kind)) {
                     conflicts.push(conflict);
                 }
-            } else if from_official == to_official {
+            } else if from_tier == to_tier {
                 edges.insert((from, to));
             }
             // Game content ahead of a user mod needs no edge: the phase order
@@ -491,10 +592,11 @@ impl<'catalog> Graph<'catalog> {
             nodes,
             successors,
             in_degree,
+            community,
         })
     }
 
-    /// Places the official tier, then the user tier, one whole level at a time.
+    /// Places official, top, ordinary and bottom tiers, one whole level at a time.
     ///
     /// Every node ready now is snapshotted, sorted and removed before the next
     /// level is formed, so a node that only became ready from this level waits.
@@ -509,9 +611,9 @@ impl<'catalog> Graph<'catalog> {
     ) -> Result<Vec<ActiveEntry>, Stopped<C>> {
         let mut in_degree = self.in_degree.clone();
         let mut placed: Vec<usize> = Vec::with_capacity(self.nodes.len());
-        for official in [true, false] {
+        for tier in 0..4 {
             let members: Vec<usize> = (0..self.nodes.len())
-                .filter(|&position| self.nodes[position].official == official)
+                .filter(|&position| self.nodes[position].tier == tier)
                 .collect();
             let mut level: Vec<usize> = members
                 .iter()
@@ -536,7 +638,7 @@ impl<'catalog> Graph<'catalog> {
                 level = next;
             }
             if placed_from_level != members.len() {
-                let blocked = members
+                let blocked: Vec<CycleMember> = members
                     .iter()
                     .copied()
                     .filter(|&position| in_degree[position] > 0)
@@ -547,6 +649,19 @@ impl<'catalog> Graph<'catalog> {
                         token: active[position].original_token().to_string(),
                     })
                     .collect();
+                if !self.community.is_empty() {
+                    return Err(Stopped::Refused(SortError::Community {
+                        message: format!(
+                            "cycle blocks {}; active community constraints: {}",
+                            blocked
+                                .iter()
+                                .map(CycleMember::describe)
+                                .collect::<Vec<_>>()
+                                .join("; "),
+                            self.community.join("; ")
+                        ),
+                    }));
+                }
                 return Err(Stopped::Refused(SortError::Cycle { members: blocked }));
             }
         }

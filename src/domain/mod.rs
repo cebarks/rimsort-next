@@ -3,6 +3,7 @@
 
 pub mod catalog;
 pub mod metadata;
+pub mod rules;
 pub mod sorting;
 pub mod types;
 pub mod validation;

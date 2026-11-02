@@ -61,8 +61,36 @@ use a fixture installation as well when testing.
 
 Unknown active tokens remain visible and survive faithful saves. Turning off
 content-warning confirmation does not hide findings or bypass IO failures.
-Profiles, community rules and Steam/SteamCMD acquisition are not implemented in
-this local slice. There are no placeholder controls for them.
+Profiles and Steam/SteamCMD acquisition are not implemented in this slice.
+There are no placeholder controls for them.
+
+### Community sorting rules
+
+Open **Rules** beside Sort to enable/disable cached rules, view source and cache
+age, or explicitly **Update rules**. Startup never downloads rules. The validated
+cache is `<data-dir>/community-rules.json`; the independent schema-1 enable
+preference is `<data-dir>/community-settings.json`. Both honor `--data-dir`.
+Without a usable cache, sorting remains metadata-only. Failed updates retain the
+last-known-good cache. A source timestamp older than 30 days is labelled stale;
+this is an informational threshold, not an automatic update or expiry.
+
+Updates use the fixed [RimSort community database](https://github.com/RimSort/Community-Rules-Database)
+HTTPS source, require HTTP 200, refuse redirects, and enforce a 4 MiB decoded
+response limit, a 10-second connection timeout and a 60-second overall timeout.
+Malformed known fields or duplicate/normalization-colliding keys reject the
+whole update. Unknown optional fields are tolerated.
+
+Sort merges metadata/dependencies with community rules in four tiers: official
+content, top user mods, ordinary user mods, bottom user mods. Official top/bottom
+flags are ignored with a validation notice. Both flags on an active user mod,
+backward cross-tier constraints, and cycles refuse sorting without changing the
+list. Within each eligible level, ordering remains deterministic by name and ID.
+Rule changes invalidate old sort results without applying game changes. Disabling
+rules during an update stays disabled when the download completes. Downloads can
+finish during protected operations, but the panel shows pending adoption until
+it is safe to change session policy. In particular, a game save's committed
+receipt is acknowledged before new rules can invalidate its source revision.
+There is no custom-rule editor, import, or configurable update endpoint.
 
 | Command | Purpose | Cargo equivalent |
 | --- | --- | --- |

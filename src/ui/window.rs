@@ -75,6 +75,11 @@ pub struct Options {
 /// The view is computed while the state lock is held and applied after it is released, so no
 /// Slint callback is ever entered from inside the lock.
 struct View {
+    rules_open: bool,
+    rules_enabled: bool,
+    rules_updating: bool,
+    rules_can_change: bool,
+    rules_status: String,
     inactive: Vec<Row>,
     active: Vec<Row>,
     inspector: Inspector,
@@ -253,6 +258,7 @@ struct App {
     note: String,
     basis: Option<PathBuf>,
     settings_file: Option<PathBuf>,
+    rules: crate::ui::rules::RulesState,
     platform: Platform,
     jobs: ComputeJobs,
     projection: Projection,
@@ -295,6 +301,7 @@ impl App {
             note: String::new(),
             basis: startup.basis.clone(),
             settings_file: startup.settings_file.clone(),
+            rules: crate::ui::rules::RulesState::load(startup.settings_file.as_deref()),
             platform: startup.platform,
             jobs: ComputeJobs::new(),
             projection: Projection::default(),
@@ -396,6 +403,11 @@ impl App {
         let inspector = self.inspector_of(catalog);
 
         View {
+            rules_open: self.rules.open,
+            rules_enabled: self.rules.enabled,
+            rules_updating: self.rules.updating,
+            rules_can_change: rules_allowed(self) && self.rules.store.is_some(),
+            rules_status: self.rules.status(),
             inactive,
             active,
             inspector,
@@ -1047,6 +1059,14 @@ impl Workspace {
 
     fn register(&self, window: &MainWindow) {
         let state = Arc::clone(&self.state);
+        window.on_show_rules(move || rules_panel(&state, true));
+        let state = Arc::clone(&self.state);
+        window.on_close_rules(move || rules_panel(&state, false));
+        let state = Arc::clone(&self.state);
+        window.on_toggle_rules(move |enabled| toggle_rules(&state, enabled));
+        let state = Arc::clone(&self.state);
+        window.on_update_rules(move || start_rules_update(&state, |store| store.update()));
+        let state = Arc::clone(&self.state);
         window.on_inactive_searched(move |text| {
             let state = Arc::clone(&state);
             edit(&state, move |app| {
@@ -1175,11 +1195,30 @@ impl Workspace {
 fn apply_delivered(app: &mut App, delivered: Delivered) -> Vec<WorkflowEvent> {
     let completion = match delivered {
         Delivered::Current(completion) => completion,
-        Delivered::Discarded { kind, .. } => {
+        Delivered::Discarded { job, kind, .. } => {
+            let slot = match kind {
+                JobKind::Sort => Some(JobSlot::Sort),
+                JobKind::Refresh => Some(JobSlot::Refresh),
+                _ => None,
+            };
+            if let Some(slot) = slot
+                && app.jobs.active(slot) == Some(job)
+            {
+                app.jobs.cancel(slot);
+            }
             app.status = format!(
                 "a {} result was drawn from a list that has changed and was dropped",
                 kind.word()
             );
+            if let Some((expected, operation)) = app.refresh
+                && expected == job
+            {
+                app.refresh = None;
+                return vec![WorkflowEvent::RefreshFinished {
+                    operation,
+                    outcome: RefreshOutcome::Failed(OperationFailure::new(app.status.clone())),
+                }];
+            }
             return Vec::new();
         }
     };
@@ -1307,7 +1346,15 @@ fn deliver_state(state: &Arc<State>) {
         // window or dispatches another job is never reached from inside it.
         reduce(state, events);
     }
-    if state.app.lock().expect("state").close_effect {
+    // Fact slots may have been released by apply_delivered, but their receipts are
+    // not acknowledged until reduce above. Never adopt policy between those steps.
+    let mut app = state.app.lock().expect("state");
+    apply_pending_rules(&mut app);
+    let close = app.close_effect;
+    let view = app.view();
+    drop(app);
+    paint(state, &view);
+    if close {
         hide(state);
     }
 }
@@ -1380,6 +1427,7 @@ fn reset_answer(state: &Arc<State>, token: &str, choice: &str) {
             app.status = "Reset cancelled; working list retained".to_string();
         }
     }
+    apply_pending_rules(&mut app);
     let view = app.view();
     drop(app);
     paint(state, &view);
@@ -1543,6 +1591,7 @@ fn answer_copy(state: &Arc<State>, nonce: &str, choice: &str) {
             }
         }
     }
+    apply_pending_rules(&mut app);
     let view = app.view();
     drop(app);
     paint(state, &view);
@@ -1819,6 +1868,9 @@ fn reduce(state: &Arc<State>, events: Vec<WorkflowEvent>) {
             app.close_effect = false;
             app.closing = false;
         }
+        if !close_out {
+            apply_pending_rules(&mut app);
+        }
         (app.view(), close_out)
     };
     paint(state, &view);
@@ -2010,6 +2062,118 @@ fn refresh(state: &Arc<State>) {
     paint(state, &view);
 }
 
+#[cfg(test)]
+#[path = "../../tests/support/window_rules_race.rs"]
+mod rules_race_tests;
+
+fn rules_allowed(app: &App) -> bool {
+    app.reset.is_none()
+        && app.prompt.is_none()
+        && app.copy.is_none()
+        && !app.closing
+        && !app.close_effect
+        && app.save.is_none()
+        && app.launch.is_none()
+        && app.refresh.is_none()
+        && !app.jobs.busy(JobSlot::Save)
+        && !app.jobs.busy(JobSlot::Launch)
+        && !app.jobs.busy(JobSlot::Refresh)
+}
+
+fn rules_panel(state: &Arc<State>, open: bool) {
+    let mut app = state.app.lock().expect("state");
+    app.rules.open = open;
+    let view = app.view();
+    drop(app);
+    paint(state, &view);
+}
+
+fn apply_pending_rules(app: &mut App) {
+    if app.rules.pending_adoption {
+        apply_rules(app);
+    }
+}
+
+fn apply_rules(app: &mut App) {
+    let rules = app.rules.effective();
+    let changed = app
+        .session
+        .as_ref()
+        .is_some_and(|session| session.rules_arc() != rules);
+    app.rules.pending_adoption = changed && !rules_allowed(app);
+    if changed
+        && !app.rules.pending_adoption
+        && let Some(session) = app.session.as_mut()
+    {
+        session.set_rules(rules);
+    }
+}
+
+fn toggle_rules(state: &Arc<State>, enabled: bool) {
+    let mut app = state.app.lock().expect("state");
+    if rules_allowed(&app) {
+        app.rules.toggle(enabled);
+        apply_rules(&mut app);
+    }
+    let view = app.view();
+    drop(app);
+    paint(state, &view);
+}
+
+fn start_rules_update(
+    state: &Arc<State>,
+    fetch: impl FnOnce(
+        crate::integrations::community::CommunityStore,
+    ) -> Result<
+        crate::domain::rules::Ruleset,
+        crate::integrations::community::RulesError,
+    > + Send
+    + 'static,
+) {
+    let store = {
+        let mut app = state.app.lock().expect("state");
+        if !rules_allowed(&app) || app.rules.updating {
+            return;
+        }
+        let Some(store) = app.rules.store.clone() else {
+            return;
+        };
+        app.rules.updating = true;
+        let view = app.view();
+        drop(app);
+        paint(state, &view);
+        store
+    };
+    let weak = Arc::downgrade(state);
+    if let Err(error) = std::thread::Builder::new()
+        .name("community-rules-update".into())
+        .spawn(move || {
+            let result = fetch(store);
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(state) = weak.upgrade() else {
+                    return;
+                };
+                if state.window.upgrade().is_none() {
+                    return;
+                }
+                let mut app = state.app.lock().expect("state");
+                // The live preference wins, including a disable while the HTTP request ran.
+                app.rules.finish(result);
+                apply_rules(&mut app);
+                let view = app.view();
+                drop(app);
+                paint(&state, &view);
+            });
+        })
+    {
+        let mut app = state.app.lock().expect("state");
+        app.rules.failed_start(&error);
+        let view = app.view();
+        drop(app);
+        paint(state, &view);
+    }
+}
+
 fn sort(state: &Arc<State>) {
     if state.app.lock().expect("state").reset.is_some() {
         return;
@@ -2082,7 +2246,9 @@ fn install(app: &mut App, replacement: RefreshReplacement, bootstrap: bool) {
             .to_string();
         return;
     };
-    let session = Session::new(catalog, config, path.to_path_buf(), target_version);
+    let mut session = Session::new(catalog, config, path.to_path_buf(), target_version);
+    session.set_rules(app.rules.effective());
+    app.rules.pending_adoption = false;
     let workflow = Workflow::new(&origin.settings, app.platform, basis);
     app.target = RefreshTarget {
         settings: origin.settings,
@@ -2323,6 +2489,11 @@ fn paint(state: &Arc<State>, view: &View) {
     window.set_validation_findings(ModelRc::from(Rc::new(VecModel::from(
         view.validation.clone(),
     ))));
+    window.set_rules_open(view.rules_open);
+    window.set_rules_enabled(view.rules_enabled);
+    window.set_rules_updating(view.rules_updating);
+    window.set_rules_can_change(view.rules_can_change);
+    window.set_rules_status(view.rules_status.as_str().into());
     window.set_reset_open(!view.reset_token.is_empty());
     window.set_reset_token(view.reset_token.as_str().into());
     window.set_reset_enabled(view.reset_enabled);
