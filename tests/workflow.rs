@@ -547,6 +547,8 @@ impl Loaded {
                     "install-refresh:{}",
                     self.shown(target.config_path().unwrap_or(Path::new("<none>")))
                 ),
+                WorkflowEffect::PromptUnsavedReplace { .. } => "prompt-unsaved-replace".to_string(),
+                WorkflowEffect::InstallReplacement { .. } => "install-replacement".to_string(),
                 WorkflowEffect::Close => "close".to_string(),
                 WorkflowEffect::ReportFailure { operation, message } => {
                     format!("report-{}:{message}", operation.word())
@@ -916,6 +918,47 @@ fn a_cancelled_close_preserves_the_pending_edits() {
     assert_eq!(case.working(), edits);
     assert!(case.session.is_dirty());
     assert_eq!(case.bytes(), document(&[CORE_TOKEN]).as_bytes());
+}
+
+#[test]
+fn pending_close_tracks_owned_operation_not_stale_answers_or_refused_requests() {
+    let mut case = Loaded::with_confirmation(&[CORE_TOKEN, MISSING_TOKEN]);
+    case.activate(HARMONY);
+    assert!(!case.workflow.has_pending_close());
+    let first = case.close_request();
+    assert!(case.workflow.has_pending_close());
+    case.answer(&first, PromptAnswer::Cancel);
+    assert!(!case.workflow.has_pending_close());
+    let second = case.close_request();
+    case.answer(&first, PromptAnswer::Cancel);
+    assert!(case.workflow.has_pending_close());
+    let warnings = case.answer(&second, PromptAnswer::Save);
+    assert_eq!(case.labels(&warnings), vec!["prompt-warnings(1)"]);
+    assert!(case.workflow.has_pending_close());
+    case.answer(&warnings, PromptAnswer::Dismiss);
+    assert!(!case.workflow.has_pending_close());
+
+    let save_warnings = case.save_request();
+    case.close_request();
+    assert!(!case.workflow.has_pending_close());
+    case.answer(&save_warnings, PromptAnswer::Dismiss);
+    let close = case.close_request();
+    let warnings = case.answer(&close, PromptAnswer::Save);
+    let saved = case.answer(&warnings, PromptAnswer::Confirm);
+    assert!(case.workflow.has_pending_close());
+    case.answer(&first, PromptAnswer::Cancel);
+    case.close_request();
+    assert!(case.workflow.has_pending_close());
+    fs::remove_file(&case.path).unwrap();
+    let reported = case.save_landed(&saved);
+    assert!(case.labels(&reported)[0].starts_with("report-save:"));
+    assert!(!case.workflow.has_pending_close());
+    assert!(case.session.is_dirty());
+    let again = case.close_request();
+    assert!(case.workflow.has_pending_close());
+    let closed = case.answer(&again, PromptAnswer::Discard);
+    assert_eq!(case.labels(&closed), vec!["close"]);
+    assert!(!case.workflow.has_pending_close());
 }
 
 #[test]

@@ -5,6 +5,7 @@ edition = "2024"
 build = "build.rs"
 
 [dependencies]
+chrono = { version = "=0.4.45", default-features = false, features = ["std"] }
 directories = "6.0.0"
 quick-xml = "0.41.0"
 serde = { version = "1.0.229", features = ["derive"] }

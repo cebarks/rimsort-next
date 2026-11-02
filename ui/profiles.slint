@@ -1,0 +1,70 @@
+import { Button, LineEdit, ListView, ScrollView } from "std-widgets.slint";
+export struct ProfileRow { id: string, name: string }
+export component ProfilesWindow inherits Window {
+    title: "Profiles — saved checkpoints";
+    preferred-width: 720px;
+    preferred-height: 600px;
+    in property <[ProfileRow]> profiles;
+    in property <[string]> history;
+    in property <string> selected-id;
+    in property <int> selected-revision;
+    in property <bool> busy;
+    in property <string> note;
+    in property <string> delete-token;
+    in-out property <string> name;
+    in-out property <string> file-path;
+    callback select-profile(string);
+    callback select-revision(int);
+    callback action(string, string);
+    callback list-action(string, string);
+    callback answer-delete(string, bool);
+    callback close-window();
+    VerticalLayout {
+        padding: 16px; spacing: 8px;
+        Text { text: "Named checkpoints: saving here does not apply to the game."; wrap: word-wrap; }
+        HorizontalLayout {
+            ListView {
+                for p in root.profiles: Button {
+                    text: (root.selected-id == p.id ? "• " : "") + p.name;
+                    enabled: !root.busy;
+                    clicked => { root.select-profile(p.id); }
+                }
+            }
+            ListView {
+                for revision[index] in root.history: Button {
+                    text: (index == root.selected-revision ? "• " : "") + revision;
+                    enabled: !root.busy;
+                    clicked => { root.select-revision(index); }
+                }
+            }
+        }
+        LineEdit { placeholder-text: "Checkpoint name"; text <=> root.name; enabled: !root.busy; }
+        HorizontalLayout {
+            Button { text: "Create"; enabled: !root.busy; clicked => { root.action("create", root.name); } }
+            Button { text: "Rename"; enabled: !root.busy; clicked => { root.action("rename", root.name); } }
+            Button { text: "Duplicate"; enabled: !root.busy; clicked => { root.action("duplicate", root.name); } }
+            Button { text: "Delete…"; enabled: !root.busy; clicked => { root.action("delete", ""); } }
+        }
+        HorizontalLayout {
+            Button { text: "Reload library"; enabled: !root.busy; clicked => { root.action("reload", ""); } }
+            Button { text: "Save profile"; enabled: !root.busy; clicked => { root.action("save", ""); } }
+            Button { text: "Load selected revision"; enabled: !root.busy; clicked => { root.action("load", ""); } }
+        }
+        LineEdit { placeholder-text: "Absolute XML or JSON file path"; text <=> root.file-path; enabled: !root.busy; }
+        HorizontalLayout {
+            Button { text: "Replace…"; enabled: !root.busy; clicked => { root.list-action("replace", root.file-path); } }
+            Button { text: "Append"; enabled: !root.busy; clicked => { root.list-action("append", root.file-path); } }
+            Button { text: "Export XML"; enabled: !root.busy; clicked => { root.list-action("export-xml", root.file-path); } }
+            Button { text: "Export JSON"; enabled: !root.busy; clicked => { root.list-action("export-json", root.file-path); } }
+        }
+        if root.delete-token != "": VerticalLayout {
+            Text { text: "Delete this checkpoint and its history? No mod files will be deleted."; wrap: word-wrap; }
+            HorizontalLayout {
+                Button { text: "Cancel"; clicked => { root.answer-delete(root.delete-token, false); } }
+                Button { text: "Delete checkpoint"; clicked => { root.answer-delete(root.delete-token, true); } }
+            }
+        }
+        ScrollView { Text { text: root.busy ? "Finishing file operation — please keep the application open…" : root.note; wrap: word-wrap; } }
+        Button { text: "Close"; enabled: !root.busy; clicked => { root.close-window(); } }
+    }
+}

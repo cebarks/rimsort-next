@@ -8,6 +8,8 @@
 
 import { Button, CheckBox, LineEdit, ListView, ScrollView, GroupBox } from "std-widgets.slint";
 
+export { ProfilesWindow, ProfileRow } from "profiles.slint";
+
 export struct Row {
     key: string,
     ordinal: int,
@@ -101,6 +103,7 @@ export component MainWindow inherits Window {
     callback reset();
     callback answer-reset(string, string);
     callback save();
+    callback open-profiles();
     callback launch();
     callback close-window();
     callback answer-prompt(string, string);
@@ -429,13 +432,14 @@ export component MainWindow inherits Window {
                 enabled: root.busy-refresh;
                 clicked => { root.cancel-refresh(); }
             }
+            Button { text: "Profiles / lists"; clicked => { root.open-profiles(); } }
             Button {
                 text: "Reset";
                 enabled: root.reset-enabled;
                 clicked => { root.reset(); }
             }
             Button {
-                text: "Save to game";
+                text: "Apply to game";
                 enabled: !root.read-only && !root.busy-save;
                 clicked => { root.save(); }
             }
@@ -491,12 +495,12 @@ export component MainWindow inherits Window {
                     clicked => { root.answer-prompt(root.prompt-token, "dismiss"); }
                 }
                 Button {
-                    text: "Discard and close";
+                    text: "Continue without applying";
                     visible: root.prompt-allow-discard;
                     clicked => { root.answer-prompt(root.prompt-token, "discard"); }
                 }
                 Button {
-                    text: root.prompt-allow-confirm ? "Confirm" : "Save";
+                    text: root.prompt-allow-confirm ? "Confirm" : "Apply to game and continue";
                     visible: root.prompt-allow-save || root.prompt-allow-confirm;
                     clicked => {
                         root.answer-prompt(root.prompt-token,

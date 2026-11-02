@@ -76,6 +76,12 @@ fn take_identity() -> u64 {
 /// after its operation is gone cannot be mistaken for a current one.
 #[derive(Debug)]
 pub enum WorkflowEvent {
+    /// Load a captured checkpoint or imported list without implicitly saving either destination.
+    ReplaceRequested {
+        tokens: Vec<String>,
+        source: String,
+        confirm_warnings: bool,
+    },
     /// The user asked to save the working list on its own.
     SaveRequested {
         /// Whether this operation asks before content findings, as the user's
@@ -239,6 +245,12 @@ pub struct RefreshReplacement {
 /// prepared against, whoever ends up performing it and whenever.
 #[derive(Debug)]
 pub enum WorkflowEffect {
+    PromptUnsavedReplace {
+        prompt: PromptId,
+        operation: OperationId,
+    },
+    /// The guard has resolved pending edits; install this exact captured candidate.
+    InstallReplacement { tokens: Vec<String>, source: String },
     /// Ask whether the pending edits should be saved before launching. Only
     /// `Save` and `Cancel` are answers to this question.
     PromptUnsavedLaunch {
@@ -313,6 +325,7 @@ pub enum WorkflowEffect {
 /// The kind of work an operation does, which is what a report is about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OperationKind {
+    Replace,
     /// Writing the configuration.
     Save,
     /// Starting the game.
@@ -328,6 +341,7 @@ impl OperationKind {
     #[must_use]
     pub const fn word(self) -> &'static str {
         match self {
+            OperationKind::Replace => "replace list",
             OperationKind::Save => "save",
             OperationKind::Launch => "launch",
             OperationKind::Refresh => "refresh",
@@ -406,6 +420,8 @@ pub struct Workflow {
     /// The findings the user accepted, tied to the operation and the revision
     /// they were shown at.
     acknowledged: Option<Acknowledgement>,
+    replacement: Option<(Vec<String>, String)>,
+    replacement_approved: bool,
 }
 
 /// The operation under way: what was asked for, what is left to run and what is
@@ -485,7 +501,9 @@ impl Question {
             Self::Unsaved(UnsavedQuestion::Launch) => {
                 matches!(answer, PromptAnswer::Save | PromptAnswer::Cancel)
             }
-            Self::Unsaved(UnsavedQuestion::Close | UnsavedQuestion::Refresh) => matches!(
+            Self::Unsaved(
+                UnsavedQuestion::Close | UnsavedQuestion::Refresh | UnsavedQuestion::Replace,
+            ) => matches!(
                 answer,
                 PromptAnswer::Save | PromptAnswer::Discard | PromptAnswer::Cancel
             ),
@@ -496,6 +514,7 @@ impl Question {
     /// What the question is about, in a refusal.
     fn word(self) -> &'static str {
         match self {
+            Self::Unsaved(UnsavedQuestion::Replace) => "unapplied replacement",
             Self::Unsaved(UnsavedQuestion::Launch) => "unsaved launch",
             Self::Unsaved(UnsavedQuestion::Close) => "unsaved close",
             Self::Unsaved(UnsavedQuestion::Refresh) => "unsaved refresh",
@@ -517,6 +536,7 @@ impl Question {
 /// over a list the user has not saved or discarded yet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum UnsavedQuestion {
+    Replace,
     Launch,
     Close,
     Refresh,
@@ -526,6 +546,7 @@ impl UnsavedQuestion {
     /// The effect that asks this question, as the prompt with this identity.
     fn prompt(self, prompt: PromptId, operation: OperationId) -> WorkflowEffect {
         match self {
+            Self::Replace => WorkflowEffect::PromptUnsavedReplace { prompt, operation },
             Self::Launch => WorkflowEffect::PromptUnsavedLaunch { prompt, operation },
             Self::Close => WorkflowEffect::PromptUnsavedClose { prompt, operation },
             Self::Refresh => WorkflowEffect::PromptUnsavedRefresh { prompt, operation },
@@ -583,7 +604,17 @@ impl Workflow {
             pending: None,
             awaiting: None,
             acknowledged: None,
+            replacement: None,
+            replacement_approved: false,
         }
+    }
+
+    /// Whether an owned close is awaiting a prompt or an in-flight save.
+    #[must_use]
+    pub fn has_pending_close(&self) -> bool {
+        self.pending
+            .as_ref()
+            .is_some_and(|pending| pending.request == OperationKind::Close)
     }
 
     /// Decides what `event` means, given the session it applies to, and returns
@@ -609,6 +640,28 @@ impl Workflow {
         }
 
         match event {
+            WorkflowEvent::ReplaceRequested {
+                tokens,
+                source,
+                confirm_warnings,
+            } => {
+                if let Some(pending) = &self.pending {
+                    effects.push(refused_while_running(
+                        OperationKind::Replace,
+                        pending.request,
+                    ));
+                } else {
+                    self.replacement = Some((tokens, source));
+                    self.replacement_approved = false;
+                    self.request(
+                        session,
+                        OperationKind::Replace,
+                        confirm_warnings,
+                        None,
+                        &mut effects,
+                    );
+                }
+            }
             WorkflowEvent::SaveRequested { confirm_warnings } => {
                 self.request(
                     session,
@@ -724,6 +777,14 @@ impl Workflow {
             // question - authorizes nothing and cancels nothing.
             return;
         };
+        if self.replacement.is_some() && outstanding.revision != session.revision() {
+            self.finish_operation();
+            effects.push(reported(
+                OperationKind::Replace,
+                "the working list changed; request replacement again".into(),
+            ));
+            return;
+        }
         if !outstanding.question.allows(answer) {
             let request = self
                 .pending
@@ -767,10 +828,15 @@ impl Workflow {
                     .as_ref()
                     .expect("an outstanding prompt always belongs to an operation")
                     .request;
+                if follow_up == OperationKind::Replace {
+                    self.replacement_approved = true;
+                }
                 let steps = match answer {
                     PromptAnswer::Save => vec![OperationKind::Save, follow_up],
                     _ => {
-                        session.reset();
+                        if follow_up != OperationKind::Replace {
+                            session.reset();
+                        }
                         vec![follow_up]
                     }
                 };
@@ -949,6 +1015,7 @@ impl Workflow {
         };
 
         if session.is_dirty()
+            && !(step == OperationKind::Replace && self.replacement_approved)
             && let Some(unsaved) = UnsavedQuestion::for_step(step)
         {
             // The unsaved gate: launching, closing or re-reading never happens over
@@ -982,6 +1049,12 @@ impl Workflow {
         }
 
         match step {
+            OperationKind::Replace => {
+                if let Some((tokens, source)) = self.replacement.take() {
+                    self.finish_operation();
+                    effects.push(WorkflowEffect::InstallReplacement { tokens, source });
+                }
+            }
             OperationKind::Save => match self.prepared(session, operation, &path) {
                 Ok((effect, expected)) => {
                     self.dispatch(step, session.revision(), Some(expected));
@@ -1116,6 +1189,8 @@ impl Workflow {
         self.pending = None;
         self.awaiting = None;
         self.acknowledged = None;
+        self.replacement = None;
+        self.replacement_approved = false;
     }
 
     /// The step whose completion is still expected, if any.
@@ -1190,6 +1265,7 @@ impl UnsavedQuestion {
     /// and re-reading each resolve pending edits first.
     fn for_step(step: Step) -> Option<Self> {
         match step {
+            OperationKind::Replace => Some(Self::Replace),
             OperationKind::Save => None,
             OperationKind::Launch => Some(Self::Launch),
             OperationKind::Close => Some(Self::Close),
