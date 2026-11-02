@@ -561,10 +561,12 @@ fn typing_into_the_form_reaches_the_settings_service() {
         warnings_before_typing,
         "typing into the fields never moved the warning checkbox"
     );
-    let warnings_at_save = warnings_checked(&ws);
     let save = discover_button(&ws, &fixture, |_ws, fixture| {
         fixture.settings_bytes() != settings_at_start
     });
+    // The discovery clicks can toggle the checkbox before reaching Save. Compare with the
+    // state at the saving click, not the state before that pointer-driven search began.
+    let warnings_at_save = warnings_checked(&ws);
     let saved = fixture.settings();
     assert_eq!(
         saved.game_root.as_deref(),

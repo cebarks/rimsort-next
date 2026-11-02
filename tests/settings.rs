@@ -509,7 +509,7 @@ fn saving_replaces_the_file_and_leaves_no_temporary_files() {
 }
 
 #[test]
-fn settings_path_names_a_rimsortrust_data_directory() {
+fn settings_path_names_a_rimsortnext_data_directory() {
     let path =
         settings_path().unwrap_or_else(|error| panic!("settings location must resolve: {error}"));
 
@@ -526,11 +526,11 @@ fn settings_path_names_a_rimsortrust_data_directory() {
             component
                 .as_os_str()
                 .to_string_lossy()
-                .eq_ignore_ascii_case("rimsortrust")
+                .eq_ignore_ascii_case("rimsortnext")
         });
     assert!(
         projects_the_rewrite,
-        "{} must live in a RimSortRust directory",
+        "{} must live in a RimSortNext directory",
         path.display()
     );
 }

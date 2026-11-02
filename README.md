@@ -1,6 +1,8 @@
-# RimSort Rust rewrite
+# RimSort Next
 
-The Rust rewrite of RimSort is built with [Slint](https://slint.dev/).
+A standalone native Rust/[Slint](https://slint.dev/) mod manager for one RimWorld
+installation. See [source provenance](docs/provenance.md) and the inherited GPL
+[license](LICENSE.md). The Cargo package/executable remains `rimsort-rust`.
 
 ## Prerequisites
 
@@ -24,10 +26,43 @@ default backend is Winit and Qt is not required.
 ## Run and develop
 
 ```sh
-cargo run --locked
+cargo run --locked -- --data-dir /path/to/isolated/app-data
 ```
 
-The first build downloads and compiles dependencies.
+The first build downloads and compiles dependencies. The application then starts
+offline without Steam, a Steam SDK, or a Python helper.
+
+`--data-dir PATH` takes precedence over `RIMSORT_NEXT_DATA_DIR`; otherwise the
+platform's `RimSortNext` local application-data directory is used. Settings live
+in `<data-dir>/settings.json`. `--help` prints usage without starting Slint.
+No settings are migrated from Python RimSort or the old `RimSortRust` directory.
+A fresh data directory does **not** isolate game paths you explicitly configure:
+use a fixture installation as well when testing.
+
+## Local workflow
+
+1. Set game root, content root (containing official `Data`), config **file**
+   (`ModsConfig.xml`), local mods root, optional Workshop root and target version.
+   An executable override is optional. No paths or versions are guessed.
+2. **Save settings** persists only the form. **Refresh from form** reads that
+   candidate installation; form edits do not redirect the already loaded session.
+3. Search the available/active lists, add/remove mods and reorder with buttons
+   or keyboard. Inspect metadata by selecting a row. **Sort** computes an order
+   in a background worker; a rejected or stale result preserves the working list.
+4. **Session validation** is always accessible below the lists, independently of
+   selection and warning confirmation. Findings include missing dependencies,
+   incompatibilities, unsupported versions and load-order violations.
+5. **Reset** restores the loaded game baseline without writing files. Unapplied
+   edits require confirmation even when content-warning confirmation is off.
+   Reset is refused while a save, launch, refresh or another question is pending.
+6. **Save to game** explicitly applies the list with external-change checking and
+   a recoverable backup. **Launch game** requires pending edits to be saved first;
+   failures never claim a successful write or launch. Close also protects edits.
+
+Unknown active tokens remain visible and survive faithful saves. Turning off
+content-warning confirmation does not hide findings or bypass IO failures.
+Profiles, community rules and Steam/SteamCMD acquisition are not implemented in
+this local slice. There are no placeholder controls for them.
 
 | Command | Purpose | Cargo equivalent |
 | --- | --- | --- |
@@ -42,14 +77,15 @@ The first build downloads and compiles dependencies.
 
 Dependencies are resolved from the tracked lockfile. Rust stable and hosted runner
 images can change, so this is not a bit-for-bit reproducible build guarantee.
-The UI is currently a minimal window. Workspace tests cover metadata behavior;
-compilation and those tests do not prove a visible window or game operations.
+Workspace tests exercise metadata, IO safety, session/workflow/job behavior and
+actual generated Slint callbacks on the testing backend. Native window checks
+and live-platform/account checks are separate: tests and compilation alone do
+not prove either. See the [capability ledger](docs/parity.md).
 
 ## CI and downloadable builds
 
 The **Rust CI** GitHub Actions workflow runs on pull requests, pushes to
-`rewrite/rust`, and manual dispatch. Update the push branch
-filter when integrating this workflow onto another branch.
+`main`, and manual dispatch. These build checks are not a release workflow.
 
 Formatting runs once on Linux. Clippy, tests, and native release builds run on
 Ubuntu 24.04 x86_64, Windows Server 2022 x86_64/MSVC, and macOS 15 Apple Silicon.

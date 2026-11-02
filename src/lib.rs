@@ -11,10 +11,10 @@
 //!   currently `About.xml` and `ModsConfig.xml` documents, safe persistence of
 //!   the latter, and the command that starts the game.
 //!
-//! The Slint binary in `src/main.rs` is the only consumer of UI types; nothing
-//! exported here depends on Slint.
+//! The UI adapter is exported so integration tests exercise the binary's actual callbacks.
 
 pub mod application;
 pub mod domain;
 pub mod integrations;
+pub mod startup;
 pub mod ui;

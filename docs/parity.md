@@ -3,9 +3,29 @@
 Capability ledger for the Rust rewrite, recorded per milestone task against the
 pinned reference baseline `1e0085d58b2687a04ed86a2b0af06769c42c4708`.
 
-Task 1 covers fixture-driven `About.xml` metadata parsing only. It is not whole
-parity, and no capability below is claimed as verified on a real install or in a
-native window.
+The metadata ledger below retains the inherited offline milestone's Task 1
+numbering. It is not the new basic-core Task 1 and is not a whole-parity claim.
+
+## Current local slice
+
+The imported workspace already supplies scanning, physical-copy resolution,
+editing, validation/sort, safe game save, launch/close workflows and worker
+result gates. Basic-core Task 1 adds isolated startup options and identity,
+confirmed Reset, and a persistent session-validation list in the Slint window.
+
+| Capability | Evidence / boundary |
+| --- | --- |
+| Startup isolation, CLI errors and no-window help | `tests/startup.rs`, `tests/settings.rs` |
+| Reset, cancelled/stale confirmations, save guard, obsolete sort invalidation | `tests/window_basics.rs`; actual generated callbacks |
+| Findings after edits/reset/refresh, confirmation off | `tests/window_basics.rs`; actual Slint model |
+| Existing local editing and physical-copy selection | `tests/window.rs`, `tests/window_copy.rs`, `tests/window_keys.rs` |
+| Safe save, fake launch, close and refresh | `tests/window_lifecycle.rs`, `tests/workflow.rs`, `tests/config.rs` |
+| Settings form and worker delivery | `tests/window_settings.rs`, `tests/window_form.rs`, `tests/jobs.rs` |
+
+These suites use isolated fixtures, not an owner's installation or account.
+`write_smoke_fixture_settings` is an ignored **fixture writer**, not a native
+window test. Native launch evidence must be recorded separately from it.
+Profiles, community rules and acquisition remain unimplemented in this slice.
 
 ## Status legend
 
@@ -30,15 +50,15 @@ native window.
 | Official metadata without a name | verified (Task 1) | `official_metadata_without_name_is_visible` |
 | Malformed XML and refused XML constructs | verified (Task 1) | `malformed_xml_is_an_error`, `unclosed_element_is_an_error`, `unexpected_root_is_an_error`, `dtd_declarations_are_rejected`, `undefined_entity_references_are_rejected` |
 | Shared domain types for later tasks | verified (Task 1) | `mod_metadata_attaches_identity_and_source`, `game_version_parses_releases_and_rejects_invalid_text`, `version_key_prefix_is_at_most_one_and_case_insensitive` |
-| Discovery of installed mods, `ModId`/`Source` assignment | unimplemented | Task 2 |
-| `ModsConfig.xml` load and active-list resolution | unimplemented | Task 2 |
-| Rewrite settings persistence | unimplemented | Task 2 |
-| Editing state and session | unimplemented | Task 3 |
-| Validation issues and topological sorting | unimplemented | Task 3 |
-| Failure-safe configuration save | unimplemented | Task 4 |
-| Save/launch/close workflow and launch adapter | unimplemented | Task 5 |
-| Background jobs and Slint workspace | unimplemented | Task 6 |
-| End-to-end offline acceptance and CI | unimplemented | Task 7 |
+| Discovery of installed mods, `ModId`/`Source` assignment | inherited implementation | `tests/scan.rs`, `tests/catalog.rs` |
+| `ModsConfig.xml` load and active-list resolution | inherited implementation | `tests/config.rs`, `tests/catalog.rs` |
+| Application settings persistence | inherited implementation; identity updated | `tests/settings.rs` |
+| Editing state and session | inherited implementation | `tests/editing.rs` |
+| Validation issues and topological sorting | inherited implementation | `tests/validation.rs`, `tests/sorting.rs` |
+| Failure-safe configuration save | inherited implementation | `tests/config.rs` |
+| Save/launch/close workflow and launch adapter | inherited implementation | `tests/workflow.rs`, `tests/window_lifecycle.rs` |
+| Background jobs and Slint workspace | inherited implementation | `tests/jobs.rs`, `tests/window*.rs` |
+| CI | inherited pinned platform matrix; private `main` trigger | `.github/workflows/ci.yml`; no hosted run claimed |
 | Scenario (`.rsc`) metadata | unimplemented | Later milestone; reference `create_scenario_mod` has no rewrite equivalent yet |
 | Community/user rule files, `loadTop`/`loadBottom` | unimplemented | Later milestone |
 | Steam, Workshop, Git/SteamCMD acquisition and metadata databases | unimplemented | Later milestone |
@@ -157,7 +177,8 @@ Each row is a deliberate choice, not an oversight. The reference is
 
 ## Verification boundary
 
-Task 1 evidence is headless `cargo test --locked --test metadata` on the host
-platform plus the `just check` gates (fmt, clippy with denied warnings, tests,
-build). No game install, real user configuration, Workshop content or native
-Slint window was exercised, and the minimal Slint binary is unchanged.
+Inherited metadata Task 1 evidence was headless `cargo test --locked --test metadata`.
+Current local-slice checks use `just check` (fmt, denied-warning clippy, all tests,
+build), plus isolated native fixture checks recorded separately. No real game,
+user configuration, account, Workshop acquisition or cross-platform runtime
+verification is claimed by Linux fixture testing.

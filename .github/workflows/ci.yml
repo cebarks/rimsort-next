@@ -3,7 +3,7 @@ name: Rust CI
 on:
   pull_request:
   push:
-    branches: [rewrite/rust]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -68,7 +68,7 @@ jobs:
           workspaces: . -> target/check
           cache-bin: false
           shared-key: ${{ matrix.os }}-${{ matrix.target }}-check
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/rewrite/rust' }}
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Clippy
         env:
           CARGO_TARGET_DIR: target/check
@@ -83,7 +83,7 @@ jobs:
           workspaces: . -> target/build
           cache-bin: false
           shared-key: ${{ matrix.os }}-${{ matrix.target }}-release
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/rewrite/rust' }}
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Release build
         env:
           CARGO_TARGET_DIR: target/build

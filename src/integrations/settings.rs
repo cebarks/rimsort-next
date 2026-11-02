@@ -1,7 +1,7 @@
 //! Persistence for the rewrite's own settings.
 //!
 //! These settings belong to the Rust rewrite alone: they are read and written
-//! in a `RimSortRust` application-data directory, never migrated from or
+//! in a `RimSortNext` application-data directory, never migrated from or
 //! compared against the Python application's settings, and no path or game
 //! release is ever autodetected or invented here. An unset field means "the user
 //! has not chosen this yet", which is a state worth saving, so a first-run file
@@ -29,7 +29,7 @@ const SUPPORTED_SCHEMA_VERSION: u32 = 1;
 /// as the whole project path on Linux and macOS and as the organisation-free
 /// application folder on Windows, so it cannot collide with the Python
 /// application's own settings directory.
-const PROJECT_NAME: &str = "RimSortRust";
+const PROJECT_NAME: &str = "RimSortNext";
 
 /// File name the settings live under inside the project's data directory.
 const SETTINGS_FILE_NAME: &str = "settings.json";
@@ -171,11 +171,16 @@ impl SettingsWire {
 /// Asking costs nothing: the directory is created by [`save_settings`], and this
 /// never reads or writes the Python application's settings.
 pub fn settings_path() -> Result<PathBuf, Error> {
+    Ok(data_dir()?.join(SETTINGS_FILE_NAME))
+}
+
+/// The isolated platform data root; querying it performs no filesystem IO.
+pub fn data_dir() -> Result<PathBuf, Error> {
     let project = ProjectDirs::from("", "", PROJECT_NAME).ok_or_else(|| Error::InvalidInput {
         context: "settings location".to_string(),
         message: "the platform application-data directory is unavailable".to_string(),
     })?;
-    Ok(project.data_local_dir().join(SETTINGS_FILE_NAME))
+    Ok(project.data_local_dir().to_path_buf())
 }
 
 /// Reads the settings stored at `path`.

@@ -22,8 +22,8 @@
 //!
 //! Every list change goes through the accepted [`Session`] verbs, and a load order computed by
 //! a job goes through [`apply_sort_order`], which refuses anything the sorter could not have
-//! produced. Nothing here re-sorts, re-scans or writes anything: saving, launching and the
-//! workflow's questions are not in this slice, so no control offers them.
+//! produced. IO is dispatched through the workflow and job host; callbacks enforce operation
+//! guards as well as the visible controls. Reset changes only the in-memory working list.
 
 slint::include_modules!();
 
@@ -78,6 +78,9 @@ struct View {
     inactive: Vec<Row>,
     active: Vec<Row>,
     inspector: Inspector,
+    validation: Vec<slint::SharedString>,
+    reset_token: String,
+    reset_enabled: bool,
     selected: String,
     dirty: bool,
     read_only: bool,
@@ -259,6 +262,8 @@ struct App {
     /// The copy question the window is asking, if any.
     copy: Option<CopyQuestion>,
     copy_serial: u64,
+    reset: Option<(String, JobSource)>,
+    reset_serial: u64,
     /// The job behind each outstanding operation, with the identity its result has to be fed
     /// back to. A fact's job is never released by a scan cancellation.
     save: Option<(JobId, OperationId)>,
@@ -297,6 +302,8 @@ impl App {
             prompt: None,
             copy: None,
             copy_serial: 0,
+            reset: None,
+            reset_serial: 0,
             save: None,
             launch: None,
             refresh: None,
@@ -392,6 +399,27 @@ impl App {
             inactive,
             active,
             inspector,
+            validation: session.map_or_else(Vec::new, |session| {
+                session
+                    .validate()
+                    .into_iter()
+                    .map(|issue| {
+                        format!(
+                            "{:?} · {}: {}",
+                            issue.severity(),
+                            issue.category,
+                            issue.message
+                        )
+                        .into()
+                    })
+                    .collect()
+            }),
+            reset_token: self
+                .reset
+                .as_ref()
+                .map(|(token, _)| token.clone())
+                .unwrap_or_default(),
+            reset_enabled: self.reset.is_none() && reset_allowed(self),
             selected: self
                 .selection_key()
                 .map(|key| key.to_string())
@@ -1037,6 +1065,10 @@ impl Workspace {
         let state = Arc::clone(&self.state);
         window.on_save(move || request(&state, RequestKind::Save));
         let state = Arc::clone(&self.state);
+        window.on_reset(move || reset_request(&state));
+        let state = Arc::clone(&self.state);
+        window.on_answer_reset(move |token, choice| reset_answer(&state, &token, &choice));
+        let state = Arc::clone(&self.state);
         window.on_launch(move || request(&state, RequestKind::Launch));
         let state = Arc::clone(&self.state);
         window.on_close_window(move || {
@@ -1286,6 +1318,13 @@ fn edit(state: &Arc<State>, change: impl FnOnce(&mut App) -> bool) {
         .app
         .lock()
         .expect("the state lock is never held across a callback");
+    if app.reset.is_some() {
+        app.status = "answer the Reset question first".to_string();
+        let view = app.view();
+        drop(app);
+        paint(state, &view);
+        return;
+    }
     if !change(&mut app) {
         let view = app.view();
         drop(app);
@@ -1295,6 +1334,64 @@ fn edit(state: &Arc<State>, change: impl FnOnce(&mut App) -> bool) {
     let view = app.view();
     drop(app);
     paint(state, &view);
+}
+
+fn reset_allowed(app: &App) -> bool {
+    app.session.is_some()
+        && app.prompt.is_none()
+        && app.copy.is_none()
+        && app.save.is_none()
+        && app.launch.is_none()
+        && app.refresh.is_none()
+        && !app.closing
+        && !app.jobs.busy(JobSlot::Save)
+        && !app.jobs.busy(JobSlot::Launch)
+        && !app.jobs.busy(JobSlot::Refresh)
+}
+
+fn reset_request(state: &Arc<State>) {
+    let mut app = state.app.lock().expect("state");
+    if app.reset.is_some() || !reset_allowed(&app) {
+        app.status = "Reset is unavailable while an operation or question is pending".to_string();
+    } else if app.session.as_ref().is_some_and(Session::is_dirty) {
+        app.reset_serial += 1;
+        app.reset = app
+            .source()
+            .map(|source| (format!("reset-{}", app.reset_serial), source));
+    } else {
+        reset_working(&mut app);
+    }
+    let view = app.view();
+    drop(app);
+    paint(state, &view);
+}
+
+fn reset_answer(state: &Arc<State>, token: &str, choice: &str) {
+    let mut app = state.app.lock().expect("state");
+    if let Some((pending, source)) = app.reset.as_ref()
+        && pending == token
+        && matches!(choice, "confirm" | "cancel")
+    {
+        let current = app.source().as_ref() == Some(source) && reset_allowed(&app);
+        app.reset = None;
+        if choice == "confirm" && current {
+            reset_working(&mut app);
+        } else {
+            app.status = "Reset cancelled; working list retained".to_string();
+        }
+    }
+    let view = app.view();
+    drop(app);
+    paint(state, &view);
+}
+
+fn reset_working(app: &mut App) {
+    let _ = app.jobs.cancel(JobSlot::Sort);
+    if let Some(session) = app.session.as_mut() {
+        session.reset();
+    }
+    app.selected = None;
+    app.status = "working list reset to the loaded game baseline; no files written".to_string();
 }
 
 /// Finds the row a window's label names, in either pane.
@@ -1555,6 +1652,9 @@ fn request(state: &Arc<State>, kind: RequestKind) {
 /// governs this operation while an operation already running keeps the value it captured; a
 /// re-read uses the installed candidate unless the form explicitly named another.
 fn request_with(state: &Arc<State>, kind: RequestKind, refresh: Option<RefreshTarget>) {
+    if state.app.lock().expect("state").reset.is_some() {
+        return;
+    }
     let (confirm, target) = {
         let app = state.app.lock().expect("state");
         (
@@ -1634,6 +1734,9 @@ fn answer(state: &Arc<State>, token: &str, choice: &str) {
 
 /// Whether a close request may take the window away.
 fn close_allowed(state: &Arc<State>) -> bool {
+    if state.app.lock().expect("state").reset.is_some() {
+        return false;
+    }
     {
         let mut app = state.app.lock().expect("state");
         if app.save.is_some()
@@ -1908,6 +2011,9 @@ fn refresh(state: &Arc<State>) {
 }
 
 fn sort(state: &Arc<State>) {
+    if state.app.lock().expect("state").reset.is_some() {
+        return;
+    }
     let snapshot = {
         let app = state.app.lock().expect("state");
         app.session.as_ref().map(ModListSnapshot::from_session)
@@ -2214,6 +2320,12 @@ fn paint(state: &Arc<State>, view: &View) {
         view.inactive.clone(),
     ))));
     window.set_active_rows(ModelRc::from(Rc::new(VecModel::from(view.active.clone()))));
+    window.set_validation_findings(ModelRc::from(Rc::new(VecModel::from(
+        view.validation.clone(),
+    ))));
+    window.set_reset_open(!view.reset_token.is_empty());
+    window.set_reset_token(view.reset_token.as_str().into());
+    window.set_reset_enabled(view.reset_enabled);
     window.set_selected_key(view.selected.as_str().into());
     window.set_inspector_title(view.inspector.title.as_str().into());
     window.set_inspector_source(view.inspector.source.as_str().into());

@@ -41,7 +41,8 @@ from GitHub's PR merge commit; build metadata identifies the source actually
 compiled. Fork PR artifacts are untrusted code, even if the workflow succeeds.
 
 The workflow compiles release binaries and runs formatting, Clippy, and workspace
-tests, including metadata behavior. The UI is currently a minimal Slint window.
+tests, including metadata, workflow safety and generated Slint callback behavior.
+The UI provides the local editor; see the README for the current feature scope.
 A successful workflow does not prove a visible window, runtime
 compatibility on another machine, or any game operations. Stable Rust and runner
 images change over time, so locked dependencies do not imply bit-for-bit

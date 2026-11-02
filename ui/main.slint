@@ -3,9 +3,8 @@
 //
 // Every control here is wired: each callback carries the private row key the controller handed
 // out, never a filtered index, and every list is a projection of the session — no search reorders
-// or re-picks anything. Drag, keyboard motion, saving, launching and the workflow's questions are
-// deliberately absent rather than present-and-inert: this window shows only what the adapter
-// actually answers.
+// or re-picks anything. Keyboard editing, safe save/launch, Reset and validation are wired;
+// drag reordering is not offered.
 
 import { Button, CheckBox, LineEdit, ListView, ScrollView, GroupBox } from "std-widgets.slint";
 
@@ -19,7 +18,7 @@ export struct Row {
 }
 
 export component MainWindow inherits Window {
-    title: "RimSort — Rust rewrite";
+    title: "RimSort Next";
     // The window opens with the keyboard on the load-order pane, so the arrows do something
     // before the user has clicked anything; a click moves it, and a text field keeps it.
     forward-focus: active-pane;
@@ -45,6 +44,10 @@ export component MainWindow inherits Window {
     in property <string> inspector-diagnostics: "";
     in property <string> status: "";
     in property <string> progress: "";
+    in property <[string]> validation-findings;
+    in property <bool> reset-open: false;
+    in property <string> reset-token: "";
+    in property <bool> reset-enabled: false;
     in property <bool> dirty: false;
     in property <bool> busy-refresh: false;
     in property <bool> busy-sort: false;
@@ -95,6 +98,8 @@ export component MainWindow inherits Window {
     callback activate-row(string);
     callback deactivate-row(string);
     callback move-row(string, int);
+    callback reset();
+    callback answer-reset(string, string);
     callback save();
     callback launch();
     callback close-window();
@@ -394,6 +399,23 @@ export component MainWindow inherits Window {
             }
         }
 
+        GroupBox {
+            title: "Session validation";
+            height: 110px;
+            VerticalLayout {
+                if root.read-only : Text { text: "Load an installation to validate its active list."; color: #b9c4da; }
+                if !root.read-only && root.validation-findings.length == 0 : Text { text: "No session findings."; color: #6fbf8f; }
+                ListView {
+                    for finding in root.validation-findings : Text {
+                        text: finding;
+                        color: #d8b25a;
+                        wrap: word-wrap;
+                        font-size: 12px;
+                    }
+                }
+            }
+        }
+
         // Status line, always visible so a scan's state is never silent.
         HorizontalLayout {
             spacing: 12px;
@@ -406,6 +428,11 @@ export component MainWindow inherits Window {
                 text: "Cancel scan";
                 enabled: root.busy-refresh;
                 clicked => { root.cancel-refresh(); }
+            }
+            Button {
+                text: "Reset";
+                enabled: root.reset-enabled;
+                clicked => { root.reset(); }
             }
             Button {
                 text: "Save to game";
@@ -424,7 +451,7 @@ export component MainWindow inherits Window {
             Text { text: root.status; color: #cfd8ea; font-size: 12px; vertical-alignment: center; }
             Text { text: root.progress; color: #7f8aa3; font-size: 12px; vertical-alignment: center; }
             Text {
-                text: root.dirty ? "unsaved changes" : "saved";
+                text: root.dirty ? "Unapplied game changes" : "Matches game baseline";
                 color: root.dirty ? #d8b25a : #6fbf8f;
                 font-size: 12px;
             }
@@ -476,6 +503,25 @@ export component MainWindow inherits Window {
                                         root.prompt-allow-confirm ? "confirm" : "save");
                     }
                 }
+            }
+        }
+    }
+    Rectangle {
+        visible: root.reset-open;
+        x: 0px; y: 0px; width: root.width; height: root.height;
+        background: #0b0f1aee;
+        TouchArea { }
+        VerticalLayout {
+            width: 520px;
+            x: (parent.width - 520px) / 2;
+            y: 60px;
+            padding: 16px;
+            spacing: 10px;
+            Text { text: "Reset unapplied game changes?"; color: #f0f3fa; font-size: 16px; }
+            Text { text: "Restore the loaded game baseline. This discards working-list edits without writing any files."; wrap: word-wrap; color: #b9c4da; }
+            HorizontalLayout {
+                Button { text: "Cancel"; clicked => { root.answer-reset(root.reset-token, "cancel"); } }
+                Button { text: "Reset working list"; clicked => { root.answer-reset(root.reset-token, "confirm"); } }
             }
         }
     }
