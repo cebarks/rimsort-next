@@ -507,7 +507,10 @@ impl Question {
                 answer,
                 PromptAnswer::Save | PromptAnswer::Discard | PromptAnswer::Cancel
             ),
-            Self::Warnings => matches!(answer, PromptAnswer::Confirm | PromptAnswer::Dismiss),
+            Self::Warnings => matches!(
+                answer,
+                PromptAnswer::Confirm | PromptAnswer::Cancel | PromptAnswer::Dismiss
+            ),
         }
     }
 
@@ -527,7 +530,7 @@ impl Question {
         match self {
             Self::Unsaved(UnsavedQuestion::Launch) => "save or cancel",
             Self::Unsaved(_) => "save, discard or cancel",
-            Self::Warnings => "confirm or dismiss",
+            Self::Warnings => "confirm, cancel or dismiss",
         }
     }
 }
@@ -607,6 +610,13 @@ impl Workflow {
             replacement: None,
             replacement_approved: false,
         }
+    }
+
+    /// Whether this exact question still belongs to the pending operation.
+    #[must_use]
+    pub fn owns_prompt(&self, prompt: PromptId) -> bool {
+        self.awaiting
+            .is_some_and(|awaiting| awaiting.prompt == prompt)
     }
 
     /// Whether an owned close is awaiting a prompt or an in-flight save.

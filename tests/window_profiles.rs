@@ -166,7 +166,19 @@ fn close_lifecycle_preserves_profile_guards_and_recovers_after_failure() {
         assert!(w.get_busy_save());
         assert!(w.window().is_visible());
     });
-    ws.with_profiles(|p| p.invoke_action("rename".into(), "Blocked during write".into()));
+    ws.with_window(|w| {
+        w.invoke_reset();
+        assert!(!w.get_reset_open());
+        w.invoke_launch();
+        assert!(!w.get_busy_launch());
+        w.invoke_close_window();
+        assert!(w.window().is_visible());
+    });
+    ws.with_profiles(|p| {
+        p.invoke_action("load".into(), "".into());
+        p.invoke_action("rename".into(), "Blocked during write".into());
+    });
+    assert_eq!(ws.active_tokens(), ["remaining"]);
     assert_eq!(
         ProfileLibrary::open(&path, &[]).unwrap().profiles()[0].name,
         "After failed close"
@@ -180,9 +192,120 @@ fn close_lifecycle_preserves_profile_guards_and_recovers_after_failure() {
     );
 }
 
+fn warning_cancel_recovers_close_and_replacement_callbacks() {
+    for operation in ["close", "load", "replace"] {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut startup = setup(tmp.path());
+        startup.target.settings.confirm_warnings = true;
+        let config = tmp.path().join("ModsConfig.xml");
+        let original = b"<ModsConfigData><activeMods><li>unknown</li><li>remaining</li></activeMods></ModsConfigData>";
+        fs::write(&config, original).unwrap();
+        let import = tmp.path().join("import.json");
+        fs::write(&import, br#"{"activeMods":["replacement"]}"#).unwrap();
+        let ws = Workspace::open(&startup).unwrap();
+        ws.show().unwrap();
+        ws.begin();
+        wait(&ws, Workspace::installed);
+        ws.with_window(|w| {
+            w.invoke_open_profiles();
+            w.invoke_deactivate_row(w.get_active_rows().row_data(0).unwrap().key);
+        });
+        idle(&ws);
+        match operation {
+            "close" => ws.with_window(|w| w.invoke_close_window()),
+            "load" => ws.with_profiles(|p| p.invoke_action("load".into(), "".into())),
+            _ => {
+                ws.with_profiles(|p| {
+                    p.invoke_list_action(
+                        "replace".into(),
+                        import.to_string_lossy().into_owned().into(),
+                    )
+                });
+                idle(&ws);
+            }
+        }
+        ws.with_window(|w| {
+            assert!(w.get_prompt_open(), "{operation}");
+            let unsaved = w.get_prompt_token();
+            w.invoke_answer_prompt(unsaved.clone(), "save".into());
+            assert!(w.get_prompt_open());
+            assert!(w.get_prompt_allow_confirm());
+            let warning = w.get_prompt_token();
+            assert_ne!(warning, unsaved);
+            w.invoke_answer_prompt(unsaved, "cancel".into());
+            assert_eq!(w.get_prompt_token(), warning);
+            assert!(w.get_prompt_open());
+            w.invoke_answer_prompt(warning, "cancel".into());
+            assert!(!w.get_prompt_open());
+            assert!(!w.get_busy_save());
+            assert!(!w.get_busy_launch());
+            assert!(w.window().is_visible());
+            assert!(w.get_dirty());
+            w.invoke_reset();
+            assert!(w.get_reset_open(), "warning Cancel stranded {operation}");
+            w.invoke_answer_reset(w.get_reset_token(), "cancel".into());
+        });
+        assert_eq!(ws.active_tokens(), ["remaining"]);
+        assert_eq!(fs::read(&config).unwrap(), original);
+        ws.with_profiles(|p| p.invoke_action("rename".into(), "After warning Cancel".into()));
+        idle(&ws);
+        assert_eq!(
+            ProfileLibrary::open(&tmp.path().join("isolated/profiles.json"), &[])
+                .unwrap()
+                .profiles()[0]
+                .name,
+            "After warning Cancel"
+        );
+        ws.with_profiles(|p| p.invoke_action("load".into(), "".into()));
+        ws.with_window(|w| {
+            assert!(w.get_prompt_open());
+            w.invoke_answer_prompt(w.get_prompt_token(), "discard".into());
+        });
+        assert_eq!(ws.active_tokens(), ["unknown", "remaining"]);
+        assert_eq!(fs::read(&config).unwrap(), original);
+    }
+}
+
+fn rejected_answers_keep_the_owned_prompt_visible() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut startup = setup(tmp.path());
+    startup.target.settings.confirm_warnings = true;
+    fs::write(tmp.path().join("ModsConfig.xml"),
+        b"<ModsConfigData><activeMods><li>unknown</li><li>remaining</li></activeMods></ModsConfigData>").unwrap();
+    let ws = Workspace::open(&startup).unwrap();
+    ws.begin();
+    wait(&ws, Workspace::installed);
+    ws.with_window(|w| {
+        w.invoke_deactivate_row(w.get_active_rows().row_data(0).unwrap().key);
+        w.invoke_close_window();
+        let unsaved = w.get_prompt_token();
+        w.invoke_answer_prompt(unsaved.clone(), "confirm".into());
+        assert!(
+            w.get_prompt_open(),
+            "rejected Confirm hid the unsaved question"
+        );
+        assert_eq!(w.get_prompt_token(), unsaved);
+        w.invoke_answer_prompt(unsaved.clone(), "save".into());
+        let warning = w.get_prompt_token();
+        assert_ne!(warning, unsaved);
+        for rejected in ["save", "discard", "not-an-answer"] {
+            w.invoke_answer_prompt(warning.clone(), rejected.into());
+            assert!(w.get_prompt_open());
+            assert!(w.get_prompt_allow_confirm());
+            assert_eq!(w.get_prompt_token(), warning);
+        }
+        w.invoke_answer_prompt(warning, "dismiss".into());
+        assert!(!w.get_prompt_open());
+        w.invoke_reset();
+        assert!(w.get_reset_open());
+    });
+}
+
 #[test]
 fn real_callbacks_keep_checkpoints_game_and_pending_replacements_separate() {
     i_slint_backend_testing::init_integration_test_with_system_time();
+    warning_cancel_recovers_close_and_replacement_callbacks();
+    rejected_answers_keep_the_owned_prompt_visible();
     close_lifecycle_preserves_profile_guards_and_recovers_after_failure();
     let tmp = tempfile::tempdir().unwrap();
     let startup = setup(tmp.path());

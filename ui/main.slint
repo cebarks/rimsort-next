@@ -490,11 +490,6 @@ export component MainWindow inherits Window {
                     clicked => { root.answer-prompt(root.prompt-token, "cancel"); }
                 }
                 Button {
-                    text: "Dismiss";
-                    visible: root.prompt-allow-confirm;
-                    clicked => { root.answer-prompt(root.prompt-token, "dismiss"); }
-                }
-                Button {
                     text: "Continue without applying";
                     visible: root.prompt-allow-discard;
                     clicked => { root.answer-prompt(root.prompt-token, "discard"); }

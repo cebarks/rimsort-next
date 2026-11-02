@@ -1716,10 +1716,7 @@ fn answer(state: &Arc<State>, token: &str, choice: &str) {
             .filter(|prompt| prompt.token == token)
             .cloned()
         {
-            Some(prompt) => {
-                app.prompt = None;
-                Some(prompt)
-            }
+            Some(prompt) => Some(prompt),
             None => {
                 app.status = "that question has already been answered or replaced".to_string();
                 None
@@ -1740,7 +1737,6 @@ fn answer(state: &Arc<State>, token: &str, choice: &str) {
         _ => None,
     }) else {
         let mut app = state.app.lock().expect("state");
-        app.prompt = Some(prompt);
         app.status = "that is not one of the answers this question offers".to_string();
         let view = app.view();
         drop(app);
@@ -1827,6 +1823,7 @@ fn reduce(state: &Arc<State>, events: Vec<WorkflowEvent>) {
             session,
             workflow,
             status,
+            prompt,
             ..
         } = &mut *app;
         let (Some(session), Some(workflow)) = (session.as_mut(), workflow.as_mut()) else {
@@ -1839,6 +1836,12 @@ fn reduce(state: &Arc<State>, events: Vec<WorkflowEvent>) {
         let mut collected = Vec::new();
         for event in events {
             collected.extend(workflow.reduce(session, event));
+        }
+        if prompt
+            .as_ref()
+            .is_some_and(|prompt| !workflow.owns_prompt(prompt.id))
+        {
+            *prompt = None;
         }
         app.closing = workflow.has_pending_close()
             || collected
@@ -2004,9 +2007,8 @@ fn apply_effects(state: &State, app: &mut App, effects: Vec<WorkflowEffect>) {
             WorkflowEffect::ReportFailure { operation, message } => {
                 app.status = format!("{}: {message}", operation.word());
                 app.reported = true;
-                app.save = None;
-                app.launch = None;
-                app.refresh = None;
+                // A refused request is not the running job's completion. Its receipt
+                // remains owned until apply_delivered consumes the matching result.
             }
             WorkflowEffect::Close => {
                 app.close_effect = true;
