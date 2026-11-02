@@ -54,7 +54,7 @@ New dependency pins, verified against current metadata while planning:
 | `sha2 = "=0.11.1"` | SteamCMD installed-tree ownership fingerprints. |
 | `command-group = "=5.0.1"` | Owned subprocess groups on Unix/Windows, default synchronous API only. |
 | `steamworks = "=0.13.1"` | Native helper package only. |
-| `steamworks-sys = "=0.13.0"` | Helper build/runtime location metadata, matching binding dependency. |
+| `steamworks-sys = "=0.13.0"` | Helper native ABI version pin, matching the binding; this release does not export runtime-location metadata. |
 
 Do not regenerate the entire lockfile or upgrade Slint. Resolve only necessary
 new dependencies; review any forced shared-dependency change. Native SDK license
@@ -469,8 +469,13 @@ or the expected sibling executable, never a shell or a binary found in a mod.
   download callback must match app/item; old installed copy plus failed update
   stays an available old copy with failed operation; callbacks require pumping;
   timeout becomes unknown; unsubscribe is separate from file-removal proof;
-  inspect never mutates subscriptions. Retain callback registrations for their
-  operation lifetime and bound outstanding calls to 20 items.
+  inspect never mutates subscriptions. Acknowledged is the successful SDK
+  call-result fact, not a claim about the current observed subscription flags:
+  preserve differing/unknown observations verbatim and show them independently.
+  Never overwrite observed flags to make them agree with an acknowledgement.
+  Retain callback registrations for their operation lifetime and bound
+  outstanding calls to 20 items. Use normal download priority, not the mode
+  that pauses unrelated Steam downloads.
 - [ ] Implement real SDK calls using pinned 0.13.1 APIs. Initialize App ID 294100
   only after valid request parsing, never use restart-as-game/login/password
   flows. Expose `--version` without SDK initialization. Main-request cancellation
@@ -487,9 +492,12 @@ or the expected sibling executable, never a shell or a binary found in a mod.
   Failed or unknown results cannot masquerade as completed installs. Reuse the
   closed-game/launch interlock and operational unknown-state acknowledgement.
 - [ ] Document and test helper runtime discovery/build behavior. The helper's
-  direct steamworks-sys dependency exposes native library output for development
-  builds; use platform loader settings or a documented adjacent runtime, not a
-  system-wide installation. Verify license notices before including native
+  pinned steamworks-sys 0.13.0 does not export the master README's
+  DEP_STEAM_API_LIB_DIR. Use verified explicit development loader settings or a
+  documented adjacent matching runtime with relative loader configuration, not
+  a system-wide install, guessed metadata or baked-in builder cache path.
+  Retain the pin rather than upgrading for a convenience API. Verify license
+  notices before including native
   runtime assets in any artifact. Missing SDK must not affect the GUI binary.
 - [ ] Run full `cargo test --locked --workspace`, Clippy/fmt/build plus
   main-only build with helper absent; update `just check` to cover workspace

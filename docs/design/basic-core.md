@@ -285,9 +285,13 @@ is a capability error; local workflows remain usable without a running client.
 Support subscribe, explicitly confirmed unsubscribe, update/download request,
 and state/progress refresh for selected Workshop items. Subscribe completion and
 installed completion are separate; verify callback app/item identities and
-installed state/path. Do not treat an elapsed timeout as success. Reconcile
-ambiguous outcomes before offering retries, and do not force resubscription as
-an update shortcut. Unsubscribe is warned as affecting Steam-managed files.
+installed state/path. A successful subscription call-result is an acknowledgement
+fact, not permission to replace a differing/unknown current subscription
+observation; preserve both and offer state refresh. Do not treat an elapsed
+timeout as success. Reconcile ambiguous outcomes before retries, and do not force
+resubscription as an update shortcut. Use normal download priority rather than
+pausing unrelated Steam downloads. Unsubscribe is warned as affecting
+Steam-managed files.
 
 Put the binding in a small on-demand `rimsort-next-steam` Rust helper executable,
 not a linked dependency of the GUI/core package. The main application sends one

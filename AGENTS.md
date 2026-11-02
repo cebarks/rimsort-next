@@ -4,8 +4,9 @@ Rust/Slint native application. `domain` owns metadata and validation;
 `application` owns session/workflow/jobs; `integrations` owns IO; `ui` adapts
 Slint controls. Keep filesystem and Slint dependencies out of domain logic.
 
-- Follow the reviewed scope in `docs/design/basic-core.md`; do not implement
-  deferred acquisition, profile or rules features incidentally.
+- Follow `docs/design/basic-core.md` and the assigned implementation-plan slice.
+  Profiles, community rules and acquisition are planned features, not permission
+  to mix unrelated slices into a change. Preserve the explicit non-goals.
 - Use isolated fixture installations and `--data-dir` for testing. Never read or
   mutate real game configuration, mods, subscriptions or credentials in tests.
 - Preserve unknown activation tokens, external-change detection, backup safety,

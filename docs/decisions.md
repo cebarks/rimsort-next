@@ -123,3 +123,21 @@ The design was revised before implementation:
   confirmation, and fail closed on uncompleted promotion recovery. External or
   detached game/Steam activity remains a disclosed limitation. Unknown Steam
   outcomes require an explicit state refresh or operational acknowledgement.
+
+### Implementation rulings
+
+- D37: prepare the independent native helper/protocol alongside the local slice
+  in a separate private worktree. It does not consume UI/session changes or
+  expose acquisition controls; GUI integration still waits for Task 4. This
+  preserves local-first delivery while overlapping independent build work.
+- D38: subscription acknowledgement is a successful SDK call-result fact, not a
+  substitute for current observed subscription flags. Preserve both, even when
+  they differ or observation is unknown. An attempted strict matching test was
+  inconsistent with D28; replace it with regression coverage against synthetic
+  flag overwrites and retain action/identity/ordering validation.
+- D39: native downloads use normal priority. High priority would pause unrelated
+  Steam downloads, a side effect outside the requested operation.
+- D40: pinned steamworks-sys 0.13.0 lacks master documentation's
+  DEP_STEAM_API_LIB_DIR. Keep the pin and document verified explicit/adjacent
+  runtime loading; do not guess metadata, embed builder paths, upgrade unrelated
+  dependencies or redistribute uncertain SDK assets.
