@@ -24,9 +24,12 @@ use crate::application::workflow::{
     RefreshTarget, SaveOutcome,
 };
 use crate::domain::catalog::{ActiveEntry, Catalog};
-use crate::domain::sorting::{SortError, SortStop, sort_active_checked};
+use crate::domain::rules::Ruleset;
+#[cfg(test)]
+use crate::domain::sorting::sort_active_checked;
+use crate::domain::sorting::{SortError, SortStop, sort_active_with_rules_checked};
 use crate::domain::types::{Error, GameVersion};
-use crate::domain::validation::{Issue, validate};
+use crate::domain::validation::{Issue, validate_with_rules};
 use crate::integrations::config::{ConfigSnapshot, PreparedSave, commit_save, parse_config};
 use crate::integrations::launch::{LaunchCommand, spawn_launch};
 use crate::integrations::scan::{ScanStop, scan_install_checked};
@@ -162,6 +165,7 @@ pub struct JobProgress {
 #[derive(Clone, Debug)]
 pub struct ModListSnapshot {
     pub catalog: Arc<Catalog>,
+    pub rules: Arc<Ruleset>,
     pub active: Vec<ActiveEntry>,
     pub target_version: GameVersion,
 }
@@ -172,6 +176,7 @@ impl ModListSnapshot {
     pub fn from_session(session: &Session) -> Self {
         Self {
             catalog: session.catalog_arc(),
+            rules: session.rules_arc(),
             active: session.working_entries().to_vec(),
             target_version: session.target_version().clone(),
         }
@@ -901,21 +906,26 @@ fn run_sort(
         return JobOutcome::Cancelled;
     }
     report.enter(JobStage::Validating);
-    let issues = validate(
+    let issues = validate_with_rules(
         &snapshot.catalog,
         &snapshot.active,
         &snapshot.target_version,
+        &snapshot.rules,
     );
     if stopped() {
         return JobOutcome::Cancelled;
     }
     report.enter(JobStage::Ordering);
-    let order =
-        match sort_active_checked(&snapshot.catalog, &snapshot.active, &report.check(stopped)) {
-            Ok(order) => Ok(order),
-            Err(SortStop::Cancelled) => return JobOutcome::Cancelled,
-            Err(SortStop::Refused(error)) => Err(error),
-        };
+    let order = match sort_active_with_rules_checked(
+        &snapshot.catalog,
+        &snapshot.active,
+        &snapshot.rules,
+        &report.check(stopped),
+    ) {
+        Ok(order) => Ok(order),
+        Err(SortStop::Cancelled) => return JobOutcome::Cancelled,
+        Err(SortStop::Refused(error)) => Err(error),
+    };
     if stopped() {
         return JobOutcome::Cancelled;
     }
@@ -996,6 +1006,7 @@ mod teardown_tests {
         .expect("the catalog must build");
         ModListSnapshot {
             catalog: Arc::new(catalog),
+            rules: Arc::default(),
             active: vec![ActiveEntry::Resolved {
                 mod_id: ModId::new("/mods/only"),
                 original_token: "only.mod".to_string(),
@@ -1142,6 +1153,7 @@ mod final_publication_tests {
         .expect("the catalog must build");
         ModListSnapshot {
             catalog: Arc::new(catalog),
+            rules: Arc::default(),
             active: vec![
                 ActiveEntry::Resolved {
                     mod_id: ModId::new("/mods/dependent"),

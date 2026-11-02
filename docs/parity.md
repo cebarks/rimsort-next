@@ -6,12 +6,13 @@ pinned reference baseline `1e0085d58b2687a04ed86a2b0af06769c42c4708`.
 The metadata ledger below retains the inherited offline milestone's Task 1
 numbering. It is not the new basic-core Task 1 and is not a whole-parity claim.
 
-## Current local slice
+## Current combined local slice
 
-The imported workspace already supplies scanning, physical-copy resolution,
+The imported workspace supplies scanning, physical-copy resolution,
 editing, validation/sort, safe game save, launch/close workflows and worker
-result gates. Basic-core Task 1 adds isolated startup options and identity,
-confirmed Reset, and a persistent session-validation list in the Slint window.
+result gates. Basic-core now includes isolated startup options and identity,
+confirmed Reset, a persistent session-validation list, named profile checkpoints
+with history/local list exchange, and cached community sorting rules.
 
 | Capability | Evidence / boundary |
 | --- | --- |
@@ -21,11 +22,19 @@ confirmed Reset, and a persistent session-validation list in the Slint window.
 | Existing local editing and physical-copy selection | `tests/window.rs`, `tests/window_copy.rs`, `tests/window_keys.rs` |
 | Safe save, fake launch, close and refresh | `tests/window_lifecycle.rs`, `tests/workflow.rs`, `tests/config.rs` |
 | Settings form and worker delivery | `tests/window_settings.rs`, `tests/window_form.rs`, `tests/jobs.rs` |
+| Named profiles, initial Default, up to 50 revisions, explicit Reload, atomic captured-root library and sidecar locking | `tests/profiles.rs`, `tests/window_profiles.rs`; checkpoints are lists, not copied mods or multiple installations |
+| XML/JSON replace, append and export; raw/unknown/qualified tokens; protected game-file aliases | `tests/lists.rs`, `tests/window_profiles.rs`; Save profile and Apply to game are independent |
+| Validated community cache, persistent enable toggle, explicit bounded HTTP update and last-known-good fallback | `tests/community.rs`, `tests/support/community_http.rs`, `tests/window_rules.rs`; startup stays offline |
+| Four sorting tiers, metadata/community constraints, conflict diagnostics and stale-sort rejection | `tests/community_sorting.rs`, `tests/window_rules.rs`; no custom-rule editor |
+| Deferred rules adoption through real save receipts, Close Cancel, warning Cancel and failed Close-save; guarded profile/import callbacks during Reset/save/launch | `tests/support/window_rules_race.rs` in the existing single-initialized library harness; controlled loopback HTTP and held job delivery |
 
 These suites use isolated fixtures, not an owner's installation or account.
 `write_smoke_fixture_settings` is an ignored **fixture writer**, not a native
 window test. Native launch evidence must be recorded separately from it.
-Profiles, community rules and acquisition remain unimplemented in this slice.
+These are headless callback/worker checks, not native-window or live-account
+proof. Steam/Workshop/SteamCMD acquisition is not integrated, and conflict
+analysis is not implemented. Community-policy conflicts are sorting diagnostics,
+not file/content conflict analysis.
 
 ## Status legend
 
@@ -60,7 +69,10 @@ Profiles, community rules and acquisition remain unimplemented in this slice.
 | Background jobs and Slint workspace | inherited implementation | `tests/jobs.rs`, `tests/window*.rs` |
 | CI | inherited pinned platform matrix; private `main` trigger | `.github/workflows/ci.yml`; no hosted run claimed |
 | Scenario (`.rsc`) metadata | unimplemented | Later milestone; reference `create_scenario_mod` has no rewrite equivalent yet |
-| Community/user rule files, `loadTop`/`loadBottom` | unimplemented | Later milestone |
+| Named profiles/history and local XML/JSON list exchange | implemented; headless tested | `tests/profiles.rs`, `tests/lists.rs`, `tests/window_profiles.rs`; captured-root `profiles.json` and sidecar, 50 revisions, explicit Reload, independent game persistence |
+| Community cache, `loadTop`/`loadBottom` and four-tier sorting | implemented; headless tested | `tests/community.rs`, `tests/community_sorting.rs`, `tests/window_rules.rs`; toggle/deferred adoption in `tests/support/window_rules_race.rs` |
+| User-rule editor/import and configurable rule endpoints | not implemented | Outside the selected community-rule scope |
+| File/content conflict analysis | unimplemented | Not implied by rule-cycle or constraint diagnostics |
 | Steam, Workshop, Git/SteamCMD acquisition and metadata databases | unimplemented | Later milestone |
 | Standalone alphabetical sorting | excluded | Explicit parity exception in `docs/design/rust-rewrite.md` |
 

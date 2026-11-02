@@ -36,9 +36,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::domain::catalog::{ActiveEntry, Catalog, resolve_active};
-use crate::domain::sorting::{SortError, sort_active};
+use crate::domain::rules::Ruleset;
+use crate::domain::sorting::{SortError, sort_active_with_rules};
 use crate::domain::types::{Error, GameVersion, ModId, PackageId};
-use crate::domain::validation::{Issue, validate};
+use crate::domain::validation::{Issue, validate_with_rules};
 use crate::integrations::config::{ConfigSnapshot, parse_config};
 
 /// Why a requested edit was refused.
@@ -107,6 +108,7 @@ pub struct Session {
     /// Shared so a later background job can read the exact records the edits
     /// were validated against, without the session handing out mutable state.
     catalog: Arc<Catalog>,
+    rules: Arc<Ruleset>,
     loaded_config: ConfigSnapshot,
     config_path: PathBuf,
     target_version: GameVersion,
@@ -147,6 +149,7 @@ impl Session {
         let provenance = Self::loaded_provenance(&saved);
         Self {
             catalog,
+            rules: Arc::default(),
             loaded_config,
             config_path,
             target_version,
@@ -264,7 +267,26 @@ impl Session {
     /// What a user should see about the working list, right now.
     #[must_use]
     pub fn validate(&self) -> Vec<Issue> {
-        validate(&self.catalog, &self.working, &self.target_version)
+        validate_with_rules(
+            &self.catalog,
+            &self.working,
+            &self.target_version,
+            &self.rules,
+        )
+    }
+
+    pub fn rules_arc(&self) -> Arc<Ruleset> {
+        Arc::clone(&self.rules)
+    }
+
+    /// Invalidate rule-dependent work without changing the saved game configuration.
+    pub fn set_rules(&mut self, rules: Arc<Ruleset>) -> bool {
+        if self.rules == rules {
+            return false;
+        }
+        self.rules = rules;
+        self.revision += 1;
+        true
     }
 
     /// Sorts the working list, publishing it only when sorting succeeds.
@@ -273,7 +295,7 @@ impl Session {
     /// revision and the dirty state untouched. Sorting an already ordered list is
     /// a no-op that does not bump the revision.
     pub fn sort(&mut self) -> Result<(), SortError> {
-        let sorted = sort_active(&self.catalog, &self.working)?;
+        let sorted = sort_active_with_rules(&self.catalog, &self.working, &self.rules)?;
         // `sort_active` returns exactly the rows it was handed, rearranged, so the
         // publish step a background order also goes through cannot refuse this one.
         let _moved = self.publish_order(&sorted);
@@ -310,8 +332,8 @@ impl Session {
         // was willing to order, and nothing else. Unresolved placeholders, copies this
         // catalog cannot use, a repeated physical copy and two active copies of one package
         // id are refused here for the same reason the sorter refuses them - none of them
-        // says which row carries which history - and this check is the row-level
-        // eligibility only: no dependency graph, tier or ordering work is repeated here.
+        // says which row carries which history. After row eligibility and membership,
+        // exact ordering is verified against this session's immutable rules as well.
         self.sortable_rows()?;
         for entry in sorted {
             Self::sortable_row(entry)?;
@@ -334,6 +356,11 @@ impl Session {
                     });
                 }
             }
+        }
+        if sort_active_with_rules(&self.catalog, &self.working, &self.rules).as_deref()
+            != Ok(sorted)
+        {
+            return Err(ApplySortError::UnexpectedOrder);
         }
         Ok(self.publish_order(sorted))
     }
@@ -806,6 +833,8 @@ impl Session {
 /// exactly as they were.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum ApplySortError {
+    #[error("order does not match the current immutable rules and metadata")]
+    UnexpectedOrder,
     /// The order was made for a different number of rows.
     #[error(
         "the order holds {sorted} entries, not this session's {working}, so it was not produced from this list"
@@ -882,6 +911,7 @@ fn encodings_for(package_id: &PackageId) -> [String; 2] {
 mod tests {
     use super::*;
     use crate::domain::catalog::UnresolvedReason;
+    use crate::domain::sorting::sort_active;
     use crate::domain::types::{ModMetadata, ParsedMetadata, Source};
 
     const CORE: &str = "/game/Data";
@@ -1154,20 +1184,44 @@ mod tests {
     }
 
     #[test]
-    fn publishing_an_order_the_list_already_has_spends_no_revision() {
+    fn a_noncanonical_unchanged_order_is_refused_without_spending_revision() {
         let mut session = unsorted_session();
         let as_loaded = session.working_entries().to_vec();
+        assert_eq!(
+            spelled(&session),
+            [CORE_TOKEN, DEPENDENT_TOKEN, PROVIDER_TOKEN]
+        );
 
         assert_eq!(
             session.apply_sorted(&as_loaded),
-            Ok(false),
-            "an order that changes nothing is not a change"
+            Err(ApplySortError::UnexpectedOrder),
+            "even an unchanged forged result must pass exact-order verification"
         );
         assert_eq!(session.revision(), 0, "so it costs no revision");
         assert!(
             !session.is_dirty(),
             "and it does not make a clean session dirty"
         );
+    }
+
+    #[test]
+    fn publishing_the_current_canonical_order_spends_no_revision() {
+        let mut session = unsorted_session();
+        // Official Core is first; the metadata edge requires Provider before Dependent.
+        let order = [
+            (CORE, CORE_TOKEN),
+            (PROVIDER, PROVIDER_TOKEN),
+            (DEPENDENT, DEPENDENT_TOKEN),
+        ]
+        .map(|(path, token)| ActiveEntry::Resolved {
+            mod_id: ModId::new(path),
+            original_token: token.into(),
+        });
+        assert_eq!(session.apply_sorted(&order), Ok(true));
+        let revision = session.revision();
+        assert_eq!(session.apply_sorted(&order), Ok(false));
+        assert_eq!(session.revision(), revision);
+        assert!(session.is_dirty());
     }
 
     #[test]

@@ -55,14 +55,78 @@ use a fixture installation as well when testing.
 5. **Reset** restores the loaded game baseline without writing files. Unapplied
    edits require confirmation even when content-warning confirmation is off.
    Reset is refused while a save, launch, refresh or another question is pending.
-6. **Save to game** explicitly applies the list with external-change checking and
+6. **Apply to game** explicitly applies the list with external-change checking and
    a recoverable backup. **Launch game** requires pending edits to be saved first;
    failures never claim a successful write or launch. Close also protects edits.
 
 Unknown active tokens remain visible and survive faithful saves. Turning off
 content-warning confirmation does not hide findings or bypass IO failures.
-Profiles, community rules and Steam/SteamCMD acquisition are not implemented in
-this local slice. There are no placeholder controls for them.
+Steam/SteamCMD acquisition and conflict analysis are not implemented in this
+combined local slice. There are no acquisition placeholder controls.
+
+### Profiles, history and local lists
+
+Open **Profiles** for named checkpoints of the active token list, not copied mods
+or separate installations. **Create**, **Rename**, **Duplicate** and confirmed
+**Delete** manage checkpoints; **Save profile** records the working list without
+writing the game config. Each profile retains up to 50 revisions (newest first),
+with UTC timestamps and reasons; consecutive identical saves add no revision.
+A new library seeds **Default** from the first loaded game baseline, even if you
+edit the list before opening Profiles.
+
+Choose a profile and revision, then **Load selected revision** to replace only
+the working list. If game changes are pending, choose to apply them first,
+continue without applying, or cancel. Loading a checkpoint does not apply it to
+the game: **Apply to game** is the separate explicit action. **Reset** still
+restores the last loaded/acknowledged game baseline, not the selected checkpoint.
+
+The library lives in `<data-dir>/profiles.json`, rooted at the application's
+captured settings directory. Atomic writes use a stable `profiles.json.lock`
+sidecar and compare against the loaded bytes to refuse conflicting writers.
+Failures preserve the previous library. Use **Reload library** explicitly after
+another instance changes it; there is no automatic overwrite/reload policy.
+
+Use an absolute XML or JSON file path to **Replace** the working list or
+**Append** nonduplicate entries. Raw, unknown and `_steam`-qualified tokens are
+preserved; imports do not silently substitute an installed-mod list. **Export
+XML** and **Export JSON** write a list atomically without saving a profile or
+applying it to the game. Exports refuse the configured game file, including
+file-identity and parent-directory aliases even when that file is missing;
+unresolvable/link destinations fail closed. Use **Apply to game**, with its
+baseline/backup safeguards, to change `ModsConfig.xml`.
+
+Profile loads/imports are guarded during Reset, workflow questions and pending
+save/launch/refresh receipts. Profile file operations also keep the application
+open until their results are consumed. Cancelled questions and failed saves
+release their ownership so later operations remain available.
+
+### Community sorting rules
+
+Open **Rules** beside Sort to enable/disable cached rules, view source and cache
+age, or explicitly **Update rules**. Startup never downloads rules. The validated
+cache is `<data-dir>/community-rules.json`; the independent schema-1 enable
+preference is `<data-dir>/community-settings.json`. Both honor `--data-dir`.
+Without a usable cache, sorting remains metadata-only. Failed updates retain the
+last-known-good cache. A source timestamp older than 30 days is labelled stale;
+this is an informational threshold, not an automatic update or expiry.
+
+Updates use the fixed [RimSort community database](https://github.com/RimSort/Community-Rules-Database)
+HTTPS source, require HTTP 200, refuse redirects, and enforce a 4 MiB decoded
+response limit, a 10-second connection timeout and a 60-second overall timeout.
+Malformed known fields or duplicate/normalization-colliding keys reject the
+whole update. Unknown optional fields are tolerated.
+
+Sort merges metadata/dependencies with community rules in four tiers: official
+content, top user mods, ordinary user mods, bottom user mods. Official top/bottom
+flags are ignored with a validation notice. Both flags on an active user mod,
+backward cross-tier constraints, and cycles refuse sorting without changing the
+list. Within each eligible level, ordering remains deterministic by name and ID.
+Rule changes invalidate old sort results without applying game changes. Disabling
+rules during an update stays disabled when the download completes. Downloads can
+finish during protected operations, but the panel shows pending adoption until
+it is safe to change session policy. In particular, a game save's committed
+receipt is acknowledged before new rules can invalidate its source revision.
+There is no custom-rule editor, import, or configurable update endpoint.
 
 | Command | Purpose | Cargo equivalent |
 | --- | --- | --- |
