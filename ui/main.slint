@@ -1,0 +1,511 @@
+// The layout-A workspace: available mods, the active load order, and a mod inspector, side by
+// side.
+//
+// Every control here is wired: each callback carries the private row key the controller handed
+// out, never a filtered index, and every list is a projection of the session — no search reorders
+// or re-picks anything. Drag, keyboard motion, saving, launching and the workflow's questions are
+// deliberately absent rather than present-and-inert: this window shows only what the adapter
+// actually answers.
+
+import { Button, CheckBox, LineEdit, ListView, ScrollView, GroupBox } from "std-widgets.slint";
+
+export struct Row {
+    key: string,
+    ordinal: int,
+    title: string,
+    detail: string,
+    unresolved: bool,
+    unusable: bool,
+}
+
+export component MainWindow inherits Window {
+    title: "RimSort — Rust rewrite";
+    // The window opens with the keyboard on the load-order pane, so the arrows do something
+    // before the user has clicked anything; a click moves it, and a text field keeps it.
+    forward-focus: active-pane;
+    preferred-width: 1120px;
+    preferred-height: 700px;
+    min-width: 940px;
+    min-height: 480px;
+    background: #141a26;
+
+    // ---- projection and state, owned by the adapter ----
+    in property <[Row]> inactive-rows;
+    in property <[Row]> active-rows;
+    // Two-way with the search fields: what the user types is the filter, and a filter the
+    // window sets is visible in the field.
+    in-out property <string> inactive-search;
+    in-out property <string> active-search;
+    in-out property <string> selected-key;
+    in property <string> inspector-title: "Nothing selected";
+    in property <string> inspector-source: "";
+    in property <string> inspector-package: "";
+    in property <string> inspector-version: "";
+    in property <string> inspector-description: "";
+    in property <string> inspector-diagnostics: "";
+    in property <string> status: "";
+    in property <string> progress: "";
+    in property <bool> dirty: false;
+    in property <bool> busy-refresh: false;
+    in property <bool> busy-sort: false;
+    in property <bool> busy-save: false;
+    in property <bool> busy-launch: false;
+
+    // The window's one question surface. `prompt-token` is the opaque identity of the
+    // question being answered, handed back with the choice so a stale or duplicated answer
+    // from an earlier dialog can be recognised as such instead of answering the new one.
+    in property <bool> prompt-open: false;
+    in property <string> prompt-title: "";
+    in property <string> prompt-detail: "";
+    in property <string> prompt-token: "";
+    in property <bool> prompt-allow-save: false;
+    in property <bool> prompt-allow-discard: false;
+    in property <bool> prompt-allow-confirm: false;
+
+    // The copy question: its own surface, so asking which physical copy a row should use can
+    // never overwrite or be overwritten by the workflow's outstanding question. The nonce is
+    // private to the window and only echoes back the request it was raised for.
+    in property <bool> copy-open: false;
+    in property <string> copy-title: "";
+    in property <string> copy-detail: "";
+    in property <string> copy-nonce: "";
+    in property <bool> read-only: true;
+
+    // The configuration form: a draft, never the loaded installation. Editing it cannot
+    // redirect a save or launch that belongs to what is already installed, and nothing is
+    // written or guessed until the user asks for it explicitly.
+    in property <string> set-game-root: "";
+    in property <string> set-content-root: "";
+    in property <string> set-config-path: "";
+    in property <string> set-local-mods-root: "";
+    in property <string> set-workshop-root: "";
+    in property <string> set-target-version: "";
+    in property <string> set-executable-override: "";
+    in property <bool> set-confirm-warnings: false;
+    in property <string> settings-note: "";
+
+    callback inactive-searched(string);
+    callback active-searched(string);
+    callback refresh();
+    callback cancel-refresh();
+    callback sort-list();
+    callback cancel-sort();
+    callback select-row(string);
+    callback inspect-row(string);
+    callback activate-row(string);
+    callback deactivate-row(string);
+    callback move-row(string, int);
+    callback save();
+    callback launch();
+    callback close-window();
+    callback answer-prompt(string, string);
+    callback edit-field(string, string);
+    callback toggle-warnings(bool);
+    callback save-settings();
+    callback refresh-from-form();
+    callback answer-copy(string, string);
+    callback select-relative(string, int);
+    callback move-selected(int);
+    callback activate-selected();
+    callback delete-selected();
+    // The save chord goes to its own intent, which the window answers with the same workflow
+    // save the Save button uses - it is not a second, lower-level save path.
+    callback keyboard-save();
+
+    function row-selected(key: string) -> bool {
+        return root.selected-key == key;
+    }
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 10px;
+
+        keys := FocusScope {
+            // Ctrl/Cmd+S is the only chord this scope takes, and only while the key is on its
+            // way to the focused item, so a plain "s" still reaches a text field.
+            capture-key-pressed(event) => {
+                if (event.modifiers.control && event.text == "s") {
+                    root.keyboard-save();
+                    return EventResult.accept;
+                }
+                return EventResult.reject;
+            }
+            HorizontalLayout {
+                spacing: 10px;
+    
+                // Available mods.
+                VerticalLayout {
+                    min-width: 280px;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        LineEdit {
+                            placeholder-text: "Search available mods";
+                            text <=> root.inactive-search;
+                            edited(text) => { root.inactive-searched(text); }
+                        }
+                        Button {
+                            text: "Add";
+                            enabled: !root.read-only && root.selected-key != "";
+                            clicked => { root.activate-row(root.selected-key); }
+                        }
+                    }
+                    available-pane := FocusScope {
+                key-pressed(event) => {
+                    if (event.modifiers.alt) { return EventResult.reject; }
+                    if (event.text == Key.UpArrow) { root.select-relative("available", -1); return EventResult.accept; }
+                    if (event.text == Key.DownArrow) { root.select-relative("available", 1); return EventResult.accept; }
+                    if (event.text == Key.Return) { root.activate-selected(); return EventResult.accept; }
+                    return EventResult.reject;
+                }
+                        ListView {
+                            for row in root.inactive-rows : Rectangle {
+                                height: 42px;
+                                width: parent.width;
+                                Rectangle {
+                                    background: root.row-selected(row.key) ? #2f3b52 : transparent;
+                                    Text {
+                                        x: 12px; y: 4px;
+                                        width: parent.width - 24px;
+                                        text: row.title;
+                                        color: #e8ecf5;
+                                        font-size: 14px;
+                                        overflow: elide;
+                                    }
+                                    Text {
+                                        x: 12px; y: 22px;
+                                        width: parent.width - 24px;
+                                        text: row.detail;
+                                        color: #9aa6bd;
+                                        font-size: 11px;
+                                        overflow: elide;
+                                    }
+                                    TouchArea {
+                                        clicked => {
+                                            // Same here: clicking a row focuses its pane, so plain arrows walk that pane.
+                                            available-pane.focus();
+                                            root.select-row(row.key);
+                                            root.inspect-row(row.key);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+    
+                // Active load order.
+                VerticalLayout {
+                    min-width: 340px;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        LineEdit {
+                            placeholder-text: "Search active mods";
+                            text <=> root.active-search;
+                            edited(text) => { root.active-searched(text); }
+                        }
+                        Button {
+                            text: "Sort";
+                            enabled: !root.read-only && !root.busy-sort;
+                            clicked => { root.sort-list(); }
+                        }
+                        Button {
+                            text: "Cancel sort";
+                            enabled: root.busy-sort;
+                            clicked => { root.cancel-sort(); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Button {
+                            text: "Up";
+                            enabled: !root.read-only && root.selected-key != "";
+                            clicked => { root.move-row(root.selected-key, -1); }
+                        }
+                        Button {
+                            text: "Down";
+                            enabled: !root.read-only && root.selected-key != "";
+                            clicked => { root.move-row(root.selected-key, 1); }
+                        }
+                        Button {
+                            text: "Remove";
+                            enabled: !root.read-only && root.selected-key != "";
+                            clicked => { root.deactivate-row(root.selected-key); }
+                        }
+                    }
+                    active-pane := FocusScope {
+                key-pressed(event) => {
+                    if (event.modifiers.alt && event.text == Key.UpArrow) {
+                        root.move-selected(-1);
+                        return EventResult.accept;
+                    }
+                    if (event.modifiers.alt && event.text == Key.DownArrow) {
+                        root.move-selected(1);
+                        return EventResult.accept;
+                    }
+                    if (event.modifiers.alt) { return EventResult.reject; }
+                    if (event.text == Key.UpArrow) { root.select-relative("active", -1); return EventResult.accept; }
+                    if (event.text == Key.DownArrow) { root.select-relative("active", 1); return EventResult.accept; }
+                    if (event.text == Key.Delete) { root.delete-selected(); return EventResult.accept; }
+                    return EventResult.reject;
+                }
+                        ListView {
+                            for row in root.active-rows : Rectangle {
+                                height: 42px;
+                                width: parent.width;
+                                Rectangle {
+                                    background: root.row-selected(row.key) ? #2f3b52 : transparent;
+                                    Rectangle {
+                                        x: 0px; y: 6px; width: 3px; height: 30px;
+                                        background: row.unresolved ? #c98a2b : (row.unusable ? #b44b4b : transparent);
+                                    }
+                                    Text {
+                                        x: 10px; y: 4px; width: 34px;
+                                        text: "\{row.ordinal}.";
+                                        color: #9fb0d0;
+                                        font-size: 12px;
+                                    }
+                                    Text {
+                                        x: 46px; y: 4px;
+                                        width: parent.width - 58px;
+                                        text: row.title;
+                                        color: #e8ecf5;
+                                        font-size: 14px;
+                                        overflow: elide;
+                                    }
+                                    Text {
+                                        x: 46px; y: 22px;
+                                        width: parent.width - 58px;
+                                        text: row.detail;
+                                        color: #9aa6bd;
+                                        font-size: 11px;
+                                        overflow: elide;
+                                    }
+                                    TouchArea {
+                                        clicked => {
+                                            // A clicked row also takes the pane's keyboard focus, so the arrows that
+                                            // follow belong to the pane the user just used.
+                                            active-pane.focus();
+                                            root.select-row(row.key);
+                                            root.inspect-row(row.key);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+    
+                // Inspector.
+                // One width-constrained, scrollable column: settings above details, stacked in the
+                // same order they are read. Two GroupBoxes were previously direct children of the
+                // ScrollView with no layout between them, which let them overlap and clip.
+                ScrollView {
+                    min-width: 340px;
+                    VerticalLayout {
+                        spacing: 10px;
+                        GroupBox {
+                            title: "Paths and behaviour";
+                        VerticalLayout {
+                            spacing: 4px;
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text { text: "Game root"; color: #b9c4da; width: 170px; vertical-alignment: center; font-size: 11px; }
+                                LineEdit {
+                                    text: root.set-game-root;
+                                    edited(value) => { root.edit-field("game-root", value); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text { text: "Content root"; color: #b9c4da; width: 170px; vertical-alignment: center; font-size: 11px; }
+                                LineEdit {
+                                    text: root.set-content-root;
+                                    edited(value) => { root.edit-field("content-root", value); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text { text: "Config file"; color: #b9c4da; width: 170px; vertical-alignment: center; font-size: 11px; }
+                                LineEdit {
+                                    text: root.set-config-path;
+                                    edited(value) => { root.edit-field("config-path", value); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text { text: "Local mods root"; color: #b9c4da; width: 170px; vertical-alignment: center; font-size: 11px; }
+                                LineEdit {
+                                    text: root.set-local-mods-root;
+                                    edited(value) => { root.edit-field("local-mods-root", value); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text { text: "Workshop root (optional)"; color: #b9c4da; width: 170px; vertical-alignment: center; font-size: 11px; }
+                                LineEdit {
+                                    text: root.set-workshop-root;
+                                    edited(value) => { root.edit-field("workshop-root", value); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text { text: "Executable override (optional)"; color: #b9c4da; width: 170px; vertical-alignment: center; font-size: 11px; }
+                                LineEdit {
+                                    text: root.set-executable-override;
+                                    edited(value) => { root.edit-field("executable-override", value); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text { text: "Target version"; color: #b9c4da; width: 170px; vertical-alignment: center; font-size: 11px; }
+                                LineEdit {
+                                    placeholder-text: "1.5.4171";
+                                    text: root.set-target-version;
+                                    edited(value) => { root.edit-field("target-version", value); }
+                                }
+                            }
+                            CheckBox {
+                                text: "Ask before saving or launching over content findings";
+                                checked: root.set-confirm-warnings;
+                                toggled => { root.toggle-warnings(self.checked); }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button { text: "Save settings"; clicked => { root.save-settings(); } }
+                                Button { text: "Refresh from form"; clicked => { root.refresh-from-form(); } }
+                            }
+                            Text { text: root.settings-note; color: #d8b25a; font-size: 11px; wrap: word-wrap; }
+                        }
+                    }
+                    GroupBox {
+                        title: "Mod details";
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: root.inspector-title; color: #f0f3fa; font-size: 15px; wrap: word-wrap; }
+                            Text { text: root.inspector-source; color: #9aa6bd; font-size: 12px; wrap: word-wrap; }
+                            Text { text: root.inspector-package; color: #9aa6bd; font-size: 12px; wrap: word-wrap; }
+                            Text { text: root.inspector-version; color: #9aa6bd; font-size: 12px; wrap: word-wrap; }
+                            Text { text: root.inspector-description; color: #cfd8ea; font-size: 12px; wrap: word-wrap; }
+                            Text { text: root.inspector-diagnostics; color: #d8b25a; font-size: 12px; wrap: word-wrap; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Status line, always visible so a scan's state is never silent.
+        HorizontalLayout {
+            spacing: 12px;
+            Button {
+                text: "Refresh";
+                enabled: !root.busy-refresh;
+                clicked => { root.refresh(); }
+            }
+            Button {
+                text: "Cancel scan";
+                enabled: root.busy-refresh;
+                clicked => { root.cancel-refresh(); }
+            }
+            Button {
+                text: "Save to game";
+                enabled: !root.read-only && !root.busy-save;
+                clicked => { root.save(); }
+            }
+            Button {
+                text: "Launch game";
+                enabled: !root.read-only && !root.busy-launch;
+                clicked => { root.launch(); }
+            }
+            Button {
+                text: "Close";
+                clicked => { root.close-window(); }
+            }
+            Text { text: root.status; color: #cfd8ea; font-size: 12px; vertical-alignment: center; }
+            Text { text: root.progress; color: #7f8aa3; font-size: 12px; vertical-alignment: center; }
+            Text {
+                text: root.dirty ? "unsaved changes" : "saved";
+                color: root.dirty ? #d8b25a : #6fbf8f;
+                font-size: 12px;
+            }
+        }
+    }
+        // The question, over the panes: it offers only the answers the reducer accepts for
+    // the question it is showing.
+    Rectangle {
+    visible: root.prompt-open;
+    x: 0px; y: 0px; width: root.width; height: root.height;
+        Rectangle { background: #0b0f1acc; }
+        VerticalLayout {
+            width: 520px;
+            x: (parent.width - 520px) / 2;
+            y: 60px;
+            padding: 16px;
+            spacing: 10px;
+            Text { text: root.prompt-title; color: #f0f3fa; font-size: 15px; font-weight: 700; wrap: word-wrap; }
+            Text {
+                text: root.prompt-detail;
+                color: #b9c4da;
+                font-size: 12px;
+                wrap: word-wrap;
+                vertical-alignment: top;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: end;
+                Button {
+                    text: "Cancel";
+                    visible: root.prompt-allow-save || root.prompt-allow-confirm;
+                    clicked => { root.answer-prompt(root.prompt-token, "cancel"); }
+                }
+                Button {
+                    text: "Dismiss";
+                    visible: root.prompt-allow-confirm;
+                    clicked => { root.answer-prompt(root.prompt-token, "dismiss"); }
+                }
+                Button {
+                    text: "Discard and close";
+                    visible: root.prompt-allow-discard;
+                    clicked => { root.answer-prompt(root.prompt-token, "discard"); }
+                }
+                Button {
+                    text: root.prompt-allow-confirm ? "Confirm" : "Save";
+                    visible: root.prompt-allow-save || root.prompt-allow-confirm;
+                    clicked => {
+                        root.answer-prompt(root.prompt-token,
+                                        root.prompt-allow-confirm ? "confirm" : "save");
+                    }
+                }
+            }
+        }
+    }
+    // The copy question, drawn over the panes while it is outstanding.
+// The copy question, as a direct child of the window like the workflow's own.
+Rectangle {
+    visible: root.copy-open;
+    x: 0px; y: 0px; width: root.width; height: root.height;
+    Rectangle { background: #0b0f1acc; }
+    VerticalLayout {
+            width: 520px;
+            x: (parent.width - 520px) / 2;
+            y: 60px;
+            padding: 16px;
+            spacing: 10px;
+            Text { text: root.copy-title; color: #f0f3fa; font-size: 15px; font-weight: 700; wrap: word-wrap; }
+            Text { text: root.copy-detail; color: #b9c4da; font-size: 12px; wrap: word-wrap; vertical-alignment: top; }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: end;
+                Button {
+                    text: "Keep the current copy";
+                    clicked => { root.answer-copy(root.copy-nonce, "cancel"); }
+                }
+                Button {
+                    text: "Use this copy";
+                    primary: true;
+                    clicked => { root.answer-copy(root.copy-nonce, "replace"); }
+                }
+            }
+        }
+    }
+}
