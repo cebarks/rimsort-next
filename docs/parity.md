@@ -36,6 +36,23 @@ proof. Steam/Workshop/SteamCMD acquisition is not integrated, and conflict
 analysis is not implemented. Community-policy conflicts are sorting diagnostics,
 not file/content conflict analysis.
 
+## Native helper scope and platform boundary
+
+The accepted [Task 5 Phase A](reviews/task-5.md) supplies the standalone
+`rimsort-next-steam` executable and bounded protocol, not acquisition UI or a
+supervising adapter. Fake-API/protocol tests cover independent observations and
+acknowledgements, bounded failure details, callback ordering and incomplete EOF.
+Linux version/invalid-input runtime checks do not initialize Steam. Main-only
+builds and the GUI dependency/link graph remain Steam-free.
+
+Per [D26](decisions.md), Windows acquisition must fail pre-spawn: audited
+`command-group` 5.0.1 and `process-wrap` 10.0.1 std paths cannot provide the required
+bounded ownership. The guards are assigned to the separate backend integration
+work and are **not delivered by this merge**. Windows offline workflows are not
+disabled; helper/protocol remain cross-platform build targets. Linux acquisition
+integration proceeds separately; macOS runtime and full Windows acquisition are
+unverified. No live-account or SDK redistribution approval is implied.
+
 ## Status legend
 
 - **verified (Task 1)**: implemented and pinned by a named headless test in
@@ -73,7 +90,9 @@ not file/content conflict analysis.
 | Community cache, `loadTop`/`loadBottom` and four-tier sorting | implemented; headless tested | `tests/community.rs`, `tests/community_sorting.rs`, `tests/window_rules.rs`; toggle/deferred adoption in `tests/support/window_rules_race.rs` |
 | User-rule editor/import and configurable rule endpoints | not implemented | Outside the selected community-rule scope |
 | File/content conflict analysis | unimplemented | Not implied by rule-cycle or constraint diagnostics |
-| Steam, Workshop, Git/SteamCMD acquisition and metadata databases | unimplemented | Later milestone |
+| Native Steam helper and bounded protocol | Phase A implemented; Linux fake-API/no-init tested | `crates/steam-helper/tests`, `crates/steam-protocol/tests`; [accepted scope](reviews/task-5.md), no GUI integration |
+| Steam/Workshop and SteamCMD acquisition | not integrated | Separate adapter/queue/backend work; Windows pre-spawn limitation D26 |
+| Git acquisition and metadata databases | not implemented | Git acquisition is outside selected basic-core scope |
 | Standalone alphabetical sorting | excluded | Explicit parity exception in `docs/design/rust-rewrite.md` |
 
 ## Intentional differences from the pinned reference

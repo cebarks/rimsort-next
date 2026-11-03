@@ -133,8 +133,16 @@ There is no custom-rule editor, import, or configurable update endpoint.
 | `just fmt` | Format Rust source | `cargo fmt --all` |
 | `just lint` | Clippy, denying warnings | `cargo clippy --locked --workspace --all-targets -- -D warnings` |
 | `just test` | Run workspace tests | `cargo test --locked --workspace` |
-| `just check` | Check formatting, lint, test, then compile | `cargo fmt --all -- --check`, then the lint and test commands above, then `cargo build --locked` |
+| `just check` | Check formatting, lint, test, then compile | `cargo fmt --all -- --check`, then the lint and test commands above, then `cargo build --locked --workspace` |
 | `just build` | Build a native release executable | `cargo build --locked --release` |
+
+`just check` covers the main application plus the separate native helper/protocol
+workspace crates; helper tests use fake APIs and version/invalid-input invocations,
+never a valid live-account request. Default `cargo build`, `cargo run` and
+`just build` still select only the Steam-free main application. The canonical
+`rimsort-next-steam` helper is Phase A infrastructure, not GUI acquisition; see
+[helper scope and runtime limitations](docs/steam-helper.md) and
+[Phase A acceptance](docs/reviews/task-5.md). No SDK runtime is packaged here.
 
 `just check` does not rewrite formatting. Release executables are written to
 `target/release/rimsort-rust` (`rimsort-rust.exe` on Windows).

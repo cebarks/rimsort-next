@@ -14,7 +14,7 @@ check:
     cargo fmt --all -- --check
     just lint
     just test
-    cargo build --locked
+    cargo build --locked --workspace
 
 build:
     cargo build --locked --release
