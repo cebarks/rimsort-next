@@ -65,6 +65,15 @@ fn main() {
     let mut input = Vec::new();
     io::stdin().read_to_end(&mut input).unwrap();
     fs::write(dir.join("request.json"), input).unwrap();
+    if mode == "startup" {
+        // Failed readers may be locally closed: do not turn BrokenPipe into a
+        // fixture panic before the test can observe real stdin EOF and bytes.
+        let _ = io::stdout().write_all(b"startup stdout\n");
+        let _ = io::stderr().write_all(b"startup stderr\n");
+        fs::write(dir.join("input-closed"), b"EOF").unwrap();
+        thread::sleep(Duration::from_secs(10));
+        return;
+    }
     if mode.starts_with("owned") || mode.starts_with("escaped") {
         let child_mode = if mode.starts_with("owned") {
             "owned"

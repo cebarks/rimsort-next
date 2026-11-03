@@ -18,6 +18,10 @@ use std::{
 };
 use steam_protocol::{Event, EventStream, MAX_LINE, MAX_REQUEST, ProtocolError, Request};
 
+#[cfg(test)]
+#[path = "../../tests/support/steam_client_startup.rs"]
+mod startup_tests;
+
 const CHUNK: usize = 8192;
 const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
 const LOG_BYTES: usize = 256 * 1024;
@@ -34,6 +38,8 @@ pub struct SteamClientConfig {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SetupError {
+    #[error("Windows acquisition is unsupported: awaiting ownership-safe process startup")]
+    UnsupportedPlatform,
     #[error("{0}")]
     InvalidConfig(&'static str),
     #[error("{0}")]
@@ -167,6 +173,15 @@ impl SteamClientReport {
 }
 
 fn command(config: &SteamClientConfig) -> Result<Command, SetupError> {
+    command_for_platform(config, cfg!(windows))
+}
+
+fn command_for_platform(config: &SteamClientConfig, windows: bool) -> Result<Command, SetupError> {
+    // command-group can lose child ownership after Windows spawn fails. Refuse
+    // the capability before checking assets, rather than risk an unowned child.
+    if windows {
+        return Err(SetupError::UnsupportedPlatform);
+    }
     if !config.helper_path.is_absolute() || config.helper_path.file_name().is_none() {
         return Err(SetupError::InvalidConfig(
             "helper must be an absolute file path",
@@ -217,9 +232,11 @@ fn command(config: &SteamClientConfig) -> Result<Command, SetupError> {
 
 /// Run on a caller-owned worker, never a GUI thread. No retries are performed.
 ///
-/// Only validation/configuration failures return Err (before spawning). Runtime
-/// failures always return an owned report. The optional observer runs synchronously
-/// after each accepted event is retained: it must return promptly and must not touch
+/// Unsupported platforms and validation/configuration failures return Err before
+/// spawning. Windows acquisition awaits ownership-safe process startup; it is
+/// disabled even if the helper/runtime is missing. Runtime failures return a report.
+/// The optional observer runs synchronously after each accepted event is retained:
+/// it must return promptly and must not touch
 /// Slint thread-bound objects. Panics are caught; an indefinitely blocking observer
 /// cannot be forcibly interrupted. Deadline includes spawn/input/init/output, with
 /// an additional 500 ms bounded cleanup allowance (OS spawn itself is synchronous).
@@ -256,7 +273,13 @@ pub fn run_request(
         stopped: false,
     };
     let (tx, rx) = mpsc::sync_channel(8);
-    let workers = start_io(&mut owned, input, tx, &mut report);
+    let workers = start_io(
+        &mut owned,
+        input,
+        tx,
+        &mut report,
+        &WorkerStarter::default(),
+    );
     let cleanup_until = supervise(
         &mut owned,
         &rx,
@@ -266,21 +289,8 @@ pub fn run_request(
         cancelled,
         start + config.total_deadline,
     );
-    // EOF can be queued just before the worker returns. Allow that return within
-    // the same cleanup budget; do not misreport a scheduling race as an escape.
     drop(rx);
-    while workers.iter().any(|worker| !worker.is_finished()) && Instant::now() < cleanup_until {
-        thread::sleep(TICK);
-    }
-    for worker in workers {
-        if worker.is_finished() {
-            if worker.join().is_err() {
-                report.fail(RunStatus::IoFailed, "I/O worker panicked");
-            }
-        } else {
-            report.cleanup.detached_workers += 1;
-        }
-    }
+    finish_workers(workers, cleanup_until, &mut report);
     report.protocol_complete = report.protocol_error.is_none() && stream.finish().is_ok();
     if let Err(error) = stream.finish() {
         report
@@ -306,6 +316,27 @@ pub fn run_request(
         }
     }
     Ok(report)
+}
+
+fn finish_workers(
+    workers: Vec<JoinHandle<()>>,
+    cleanup_until: Instant,
+    report: &mut SteamClientReport,
+) {
+    // EOF can be queued just before the worker returns. Allow that return within
+    // the same cleanup budget; do not misreport a scheduling race as an escape.
+    while workers.iter().any(|worker| !worker.is_finished()) && Instant::now() < cleanup_until {
+        thread::sleep(TICK);
+    }
+    for worker in workers {
+        if worker.is_finished() {
+            if worker.join().is_err() {
+                report.fail(RunStatus::IoFailed, "I/O worker panicked");
+            }
+        } else {
+            report.cleanup.detached_workers += 1;
+        }
+    }
 }
 
 struct OwnedChild {
@@ -351,6 +382,25 @@ impl Drop for OwnedChild {
     }
 }
 
+#[derive(Default)]
+struct WorkerStarter {
+    #[cfg(test)]
+    fail_at: Option<&'static str>,
+}
+impl WorkerStarter {
+    fn spawn(
+        &self,
+        name: &'static str,
+        task: impl FnOnce() + Send + 'static,
+    ) -> io::Result<JoinHandle<()>> {
+        #[cfg(test)]
+        if self.fail_at == Some(name) {
+            return Err(io::Error::other(format!("controlled {name} start failure")));
+        }
+        thread::Builder::new().name(name.into()).spawn(task)
+    }
+}
+
 enum Message {
     Data(OutputSource, Vec<u8>),
     End(OutputSource, io::Result<()>),
@@ -385,6 +435,7 @@ fn start_io(
     input: Vec<u8>,
     tx: SyncSender<Message>,
     report: &mut SteamClientReport,
+    starter: &WorkerStarter,
 ) -> Vec<JoinHandle<()>> {
     let inner = owned.child().inner();
     let stdout = inner.stdout.take().expect("stdout configured piped");
@@ -392,26 +443,40 @@ fn start_io(
     let mut stdin = inner.stdin.take().expect("stdin configured piped");
     let out_tx = tx.clone();
     let err_tx = tx.clone();
-    let attempts = [
-        thread::Builder::new()
-            .name("steam-stdout".into())
-            .spawn(move || reader(stdout, OutputSource::Stdout, out_tx)),
-        thread::Builder::new()
-            .name("steam-stderr".into())
-            .spawn(move || reader(stderr, OutputSource::Stderr, err_tx)),
-        thread::Builder::new()
-            .name("steam-stdin".into())
-            .spawn(move || {
-                let result = stdin.write_all(&input);
-                drop(stdin); // EOF is part of the request, not delayed until process exit.
-                let _ = tx.send(Message::Input(result));
-            }),
-    ];
     let mut workers = Vec::new();
-    for result in attempts {
-        match result {
-            Ok(worker) => workers.push(worker),
-            Err(error) => report.fail(RunStatus::IoFailed, error.to_string()),
+    match starter.spawn("steam-stdout", move || {
+        reader(stdout, OutputSource::Stdout, out_tx)
+    }) {
+        Ok(worker) => workers.push(worker),
+        Err(error) => {
+            drop(stdin);
+            report.cleanup.stdin_closed = true;
+            report.fail(RunStatus::IoFailed, error.to_string());
+            return workers;
+        }
+    }
+    match starter.spawn("steam-stderr", move || {
+        reader(stderr, OutputSource::Stderr, err_tx)
+    }) {
+        Ok(worker) => workers.push(worker),
+        Err(error) => {
+            drop(stdin);
+            report.cleanup.stdin_closed = true;
+            report.fail(RunStatus::IoFailed, error.to_string());
+            return workers;
+        }
+    }
+    // Only release a valid request after both reader starts have succeeded.
+    match starter.spawn("steam-stdin", move || {
+        let result = stdin.write_all(&input);
+        drop(stdin); // EOF is part of the request, not delayed until process exit.
+        let _ = tx.send(Message::Input(result));
+    }) {
+        Ok(worker) => workers.push(worker),
+        Err(error) => {
+            // A failed spawn drops its closure, including the untouched stdin.
+            report.cleanup.stdin_closed = true;
+            report.fail(RunStatus::IoFailed, error.to_string());
         }
     }
     workers
