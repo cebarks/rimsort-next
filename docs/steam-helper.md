@@ -182,7 +182,7 @@ proof are still outstanding, not implied by successful compilation.
 Windows acquisition must fail before spawning a helper or SteamCMD backend:
 `command-group` 5.0.1 Windows creation is not failure-atomic, and the audited
 `process-wrap` 10.0.1 std implementation also fails bounded ownership requirements.
-[D26](decisions.md) rules out unverified bespoke Win32 code and unsafe fallbacks.
+[D50](decisions.md) rules out unverified bespoke Win32 code and unsafe fallbacks.
 The guards belong to separate backend work, not this Phase A merge. Helper and
 protocol remain cross-platform build targets; Windows offline local workflows
 are not disabled. Linux acquisition integration proceeds separately; macOS

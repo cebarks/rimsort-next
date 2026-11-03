@@ -2,10 +2,11 @@
 //! decisions that save, launch, close and refresh run over it.
 //!
 //! This layer binds the read-only domain and integration types into one editing
-//! context. It has no filesystem, process or UI dependency: [`session`] holds the
-//! edits, [`workflow`] decides the order their effects have to happen in, and the
-//! effects that write a file or start a process are carried out by the caller.
+//! context. [`session`] holds the edits, [`workflow`] decides the order their
+//! effects have to happen in, and [`acquisition`] captures worker inputs and
+//! receipts for the concrete acquisition integrations. None depends on the UI.
 
+pub mod acquisition;
 pub mod jobs;
 pub mod session;
 pub mod workflow;

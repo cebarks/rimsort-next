@@ -3,7 +3,10 @@
 Accepted incoming helper/protocol: `69f26c1d51505d245a71da32ffbdca8b54b83773`,
 fixing reviewed Phase A `bf7a651db0c77f7a286e9987c87060d4aa83f402`.
 This accepts the native helper boundary, **not full Task 5 acquisition delivery**.
-The local helper merge still requires its own independent integration review.
+The local/helper merge `a897e6d` passed independent spec/quality integration
+review with no blocking issue. Its fresh workspace gates passed 540 tests,
+0 failed and 1 existing ignored fixture-writer. The minor Windows ownership
+ruling reference is corrected to D50; profile checkpoint D26 is unchanged.
 
 ## Accepted scope and review resolutions
 
@@ -44,7 +47,7 @@ execution proof even though helper/protocol remain cross-platform build targets.
 Phase B must provide bounded process ownership, aggregate IO/init deadlines,
 crash/cancel fact retention, inspect-before-retry, verified usable installation
 paths/metadata, queue/UI integration and launch/mutation exclusion. Windows
-acquisition must fail pre-spawn under [D26](../decisions.md); that guard belongs
+acquisition must fail pre-spawn under [D50](../decisions.md); that guard belongs
 to separate backend integration and is not claimed delivered here. Windows
 offline local workflows remain enabled. See [helper contract](../steam-helper.md)
 for precise limits and safety constraints.
