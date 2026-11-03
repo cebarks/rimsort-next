@@ -1,5 +1,16 @@
 use super::*;
 
+#[test]
+fn platform_policy_rejects_windows_but_preserves_unix_acquisition() {
+    let error = ensure_acquisition_platform("windows").unwrap_err();
+    assert!(matches!(error, AcquisitionError::UnsupportedPlatform(_)));
+    assert!(error.to_string().contains("unsupported platform"));
+    assert!(error.to_string().contains("safe Windows startup"));
+    for platform in ["linux", "macos"] {
+        ensure_acquisition_platform(platform).unwrap();
+    }
+}
+
 const LIVE_SUCCESS: &str = "\x1b[0mSuccess. Downloaded item 2009463077 to \"/work/content/steamapps/workshop/content/294100/2009463077\" (8306239 bytes) \x1b[0m\x1b[1mquit";
 
 struct Chunked {

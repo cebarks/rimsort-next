@@ -48,6 +48,8 @@ pub fn freshness(recorded: Option<u64>, upstream: Option<u64>) -> Freshness {
 
 #[derive(Debug, thiserror::Error)]
 pub enum AcquisitionError {
+    #[error("unsupported platform: {0}")]
+    UnsupportedPlatform(String),
     #[error("invalid acquisition input: {0}")]
     Invalid(String),
     #[error("acquisition IO: {0}")]

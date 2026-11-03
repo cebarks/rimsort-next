@@ -1,4 +1,6 @@
 //! Controlled SteamCMD subprocesses. No bootstrap, credentials, shell commands or log-path publication.
+//! Windows acquisition is disabled before IO pending safe owned-process startup;
+//! pure script construction and Workshop parsing remain available.
 use crate::{
     application::acquisition::{
         AcquisitionBackend, AcquisitionError, AcquisitionEvent, AcquisitionItem, AcquisitionReport,
@@ -79,6 +81,15 @@ pub fn run_downloads(
     run_downloads_with_updates(config, ids, &HashMap::new(), cancel, event)
 }
 
+fn ensure_acquisition_platform(platform: &str) -> Result<(), AcquisitionError> {
+    if platform == "windows" {
+        return Err(AcquisitionError::UnsupportedPlatform(
+            "SteamCMD acquisition is disabled on Windows pending safe Windows startup; use a supported platform for acquisition or install mods manually. Local Workshop parsing remains available.".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn run_downloads_with_updates(
     config: &SteamCmdConfig,
     ids: &[PublishedFileId],
@@ -86,6 +97,7 @@ pub(crate) fn run_downloads_with_updates(
     cancel: &AtomicBool,
     event: &mut dyn FnMut(AcquisitionEvent),
 ) -> Result<AcquisitionReport, AcquisitionError> {
+    ensure_acquisition_platform(std::env::consts::OS)?;
     if ids.len() > 10_000 || config.batch_timeout.is_zero() {
         return Err(AcquisitionError::Invalid(
             "invalid selection size or deadline".into(),
