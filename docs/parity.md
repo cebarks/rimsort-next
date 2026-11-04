@@ -42,6 +42,10 @@ are sorting diagnostics, not file/content conflict analysis.
 installations, local HTTP and controlled executable fixtures. It covers preview,
 confirmation, actual publication, explicit catalog-only rescan, captured settings,
 direct-child exclusion, cancellation/Close and retry of failed history persistence.
+Generated form edits and competing valid preferences have immediate draft/projection
+and persisted-settings oracles. Completed A → Refresh B recovery covers successful
+launch and corrupt B preservation/repair, without rewriting A's historical receipt;
+unresolved A still refuses replacement.
 `tests/support/acquisition_worker.rs` holds both prepared publication and the real
 backend's streamed Finished inside installer ownership: no final receipt, history
 write, launch or hide is allowed until actual return. Recovery callbacks exercise

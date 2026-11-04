@@ -134,10 +134,14 @@ ownership, staging, a prior verified backup and recovery intent, outside scanned
 Mods. Startup checks/reconciles existing management state off-thread before launch,
 including when Acquisition has never been opened. Unknown/corrupt state is
 preserved and blocks launch/mutation; **Retry recovery** performs real validation,
-not acknowledgement. After recovery, current verified observations are persisted
-in the same request receipt; the original failed download/operation remains a
-fact. A failed write still blocks launch/close until **Retry report write** succeeds.
-No management directory is created by checking an unmanaged installation.
+not acknowledgement. For an unresolved acquisition, current verified observations
+are persisted in the same request receipt after recovery; the original failed
+download/operation remains a fact. A failed write still blocks launch/close until
+**Retry report write** succeeds. Refreshing the loaded installation retires a
+fully settled receipt to history: recovery of the replacement Mods root never
+rewrites that old receipt, even if the replacement has a corrupt journal.
+Unresolved acquisitions still prevent replacement. No management directory is
+created by checking an unmanaged installation.
 
 Close during an operation offers **Keep window open** or **Cancel operations and
 close**. The manager stays open until backend return/cleanup and durable receipt

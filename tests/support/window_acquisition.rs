@@ -197,13 +197,67 @@ fn close_cancel_and_report_retry() {
     let previous_config = fs::read(root.path().join("ModsConfig.xml")).unwrap();
     let history = root.path().join("private/last-acquisition.json");
     fs::create_dir(&history).unwrap(); // Real persistence failure, after controlled cancellation.
-    start(&ws);
-    wait(&ws, |_| started.exists());
+    let original_exe = root.path().join("controlled steamcmd");
+    let preferences_path = root.path().join("private/acquisition-preferences.json");
+    let preferences = fs::read(&preferences_path).unwrap();
+    let alternate = root.path().join("alternate steamcmd");
+    fs::copy(&original_exe, &alternate).unwrap();
+    crate::integrations::acquisition_state::Preferences {
+        schema_version: 1,
+        executable: alternate.clone(),
+        timeout_seconds: 37,
+    }
+    .validate()
+    .unwrap();
+    ws.with_acquisition(|w| w.invoke_acquire());
+    let captured_question = ws.with_acquisition(|w| w.get_question());
+    assert!(captured_question.contains(root.path().join("Mods").to_str().unwrap()));
+    assert!(captured_question.contains(original_exe.to_str().unwrap()));
+    assert!(captured_question.contains("deadline: 900 seconds"));
     ws.with_window(|w| {
         w.invoke_edit_field(
-            "local_mods_root".into(),
+            "local-mods-root".into(),
             root.path().join("Other").to_string_lossy().as_ref().into(),
         );
+        assert_eq!(
+            w.get_set_local_mods_root(),
+            root.path().join("Other").to_str().unwrap(),
+            "the generated edit callback must visibly change the draft"
+        );
+    });
+    ws.with_acquisition(|w| {
+        assert_eq!(w.get_question(), captured_question);
+        w.invoke_answer_question(w.get_question_token(), "confirm".into());
+        assert!(w.get_busy());
+    });
+    wait(&ws, |_| started.exists());
+    let running_draft = root.path().join("WhileRunning");
+    fs::create_dir(&running_draft).unwrap();
+    let captured_source = ws.source();
+    ws.with_window(|w| {
+        w.invoke_edit_field(
+            "local-mods-root".into(),
+            running_draft.to_string_lossy().as_ref().into(),
+        );
+        assert_eq!(w.get_set_local_mods_root(), running_draft.to_str().unwrap());
+    });
+    ws.with_acquisition(|w| {
+        w.set_executable(alternate.to_string_lossy().as_ref().into());
+        w.set_timeout_seconds("37".into());
+        w.invoke_save_preferences(w.get_executable(), w.get_timeout_seconds());
+    });
+    assert_eq!(fs::read(&preferences_path).unwrap(), preferences);
+    ws.deliver();
+    ws.with_acquisition(|w| {
+        assert!(w.get_busy());
+        assert_eq!(w.get_executable(), original_exe.to_str().unwrap());
+        assert_eq!(w.get_timeout_seconds(), "900");
+    });
+    ws.with_window(|w| {
+        assert_eq!(w.get_set_local_mods_root(), running_draft.to_str().unwrap());
+        w.invoke_refresh_from_form();
+        assert!(w.get_status().contains("refused"));
+        assert!(!w.get_busy_refresh());
         w.invoke_launch();
         assert!(w.get_status().contains("refused"));
         w.invoke_close_window();
@@ -226,6 +280,9 @@ fn close_cancel_and_report_retry() {
     wait(&ws, |w| w.with_acquisition(|a| !a.get_busy()));
     ws.with_window(|w| {
         assert!(w.window().is_visible());
+        w.invoke_refresh_from_form();
+        assert!(w.get_status().contains("refused"));
+        assert!(!w.get_busy_refresh());
         w.invoke_launch();
         assert!(w.get_status().contains("refused"));
         assert!(w.get_dirty());
@@ -239,6 +296,11 @@ fn close_cancel_and_report_retry() {
         previous_config
     );
     assert!(!root.path().join("Mods/42").exists());
+    assert_eq!(ws.source(), captured_source);
+    assert_eq!(
+        ws.state.app.lock().unwrap().target.settings.local_mods_root,
+        Some(root.path().join("Mods"))
+    );
     fs::remove_dir(&history).unwrap();
     ws.with_acquisition(|w| w.invoke_retry_report());
     wait(&ws, |w| w.with_acquisition(|a| !a.get_busy()));
@@ -248,6 +310,11 @@ fn close_cancel_and_report_retry() {
         root.path().join("Mods").to_str().unwrap()
     );
     assert_eq!(report["timeout_seconds"], 900);
+    assert_eq!(report["executable"], original_exe.to_str().unwrap());
+    assert_eq!(fs::read(&preferences_path).unwrap(), preferences);
+    ws.with_window(|w| {
+        assert_eq!(w.get_set_local_mods_root(), running_draft.to_str().unwrap());
+    });
     assert_eq!(report["report"]["items"][0]["outcome"], "Cancelled");
     ws.with_window(|w| {
         assert!(w.get_prompt_open());
@@ -441,11 +508,33 @@ fn mutation_recovery_failure_is_not_acknowledged_away() {
         "unrecovered mutation did not retain recovery gate: {report}"
     );
     assert_eq!(report["report"]["items"][0]["item_id"], 42);
+    let replacement = root.path().join("UnresolvedReplacement");
+    fs::create_dir(&replacement).unwrap();
+    let source = ws.source();
+    let original = fs::read(&history).unwrap();
     ws.with_window(|w| {
+        w.invoke_edit_field(
+            "local-mods-root".into(),
+            replacement.to_string_lossy().as_ref().into(),
+        );
+        assert_eq!(w.get_set_local_mods_root(), replacement.to_str().unwrap());
+        w.invoke_refresh_from_form();
+        assert!(w.get_status().contains("refused"));
+        assert!(!w.get_busy_refresh());
         w.invoke_launch();
         assert!(w.get_status().contains("refused"));
     });
-    ws.with_acquisition(|w| w.invoke_retry_recovery());
+    ws.deliver();
+    assert_eq!(ws.source(), source);
+    assert_eq!(
+        ws.state.app.lock().unwrap().target.settings.local_mods_root,
+        Some(root.path().join("Mods"))
+    );
+    assert_eq!(fs::read(&history).unwrap(), original);
+    ws.with_acquisition(|w| {
+        assert!(!w.get_facts().contains("HISTORICAL"));
+        w.invoke_retry_recovery();
+    });
     wait(&ws, |w| w.with_acquisition(|a| !a.get_busy()));
     assert_eq!(fs::read_to_string(&journal).unwrap(), "invalid journal");
     assert!(ws.state.app.lock().unwrap().acquisition.launch_blocked());
@@ -740,7 +829,138 @@ fn restarted_history_yields_to_current_progress() {
     assert!(!facts.contains("HISTORICAL"));
 }
 
+fn completed_receipt_does_not_own_replacement_recovery(corrupt: bool) {
+    use crate::integrations::install::Installer;
+
+    let (root, ws) = fixture();
+    prepared(&ws, root.path(), "", "900");
+    start(&ws);
+    wait(&ws, |w| w.with_acquisition(|a| !a.get_busy()));
+    let history = root.path().join("private/last-acquisition.json");
+    let original = fs::read(&history).unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    assert_eq!(report["report"]["items"][0]["outcome"], "Succeeded");
+    assert!(report["report"]["recovery_required"].is_null());
+    assert!(!ws.state.app.lock().unwrap().acquisition.launch_blocked());
+
+    let launched = root.path().join("replacement-launched");
+    let game = root.path().join("RimWorldLinux64");
+    fs::write(
+        &game,
+        format!(
+            "#!/usr/bin/python3\nimport pathlib\npathlib.Path({:?}).write_text('launched')\n",
+            launched.to_string_lossy()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&game, fs::Permissions::from_mode(0o700)).unwrap();
+    let replacement = root.path().join("ReplacementMods");
+    fs::create_dir(&replacement).unwrap();
+    fs::write(replacement.join("untouched"), "B original content").unwrap();
+    drop(Installer::open(&replacement).unwrap());
+    let home = root.path().join(".rimsort-next-ReplacementMods");
+    let owner = fs::read(home.join("owner.json")).unwrap();
+    let journal = home.join("journal.json");
+    if corrupt {
+        fs::write(&journal, "B corrupt journal").unwrap();
+    }
+    let before = ws.source();
+    ws.with_window(|w| {
+        w.invoke_edit_field(
+            "local-mods-root".into(),
+            replacement.to_string_lossy().as_ref().into(),
+        );
+        assert_eq!(w.get_set_local_mods_root(), replacement.to_str().unwrap());
+        w.invoke_refresh_from_form();
+        assert!(w.get_busy_refresh());
+    });
+    wait(&ws, |w| {
+        w.source() != before
+            && w.with_window(|a| !a.get_busy_refresh())
+            && w.with_acquisition(|a| !a.get_busy())
+    });
+    assert_eq!(
+        ws.state
+            .app
+            .lock()
+            .unwrap()
+            .target
+            .settings
+            .local_mods_root
+            .as_ref(),
+        Some(&replacement)
+    );
+    assert!(ws.state.app.lock().unwrap().acquisition.recovery_attempted);
+    assert_eq!(
+        fs::read(&history).unwrap(),
+        original,
+        "B recovery must not rewrite A's settled receipt"
+    );
+    ws.with_acquisition(|w| {
+        assert!(w.get_facts().contains("HISTORICAL"), "{}", w.get_facts());
+        assert!(w.get_facts().contains("Succeeded"));
+    });
+    assert_eq!(fs::read(home.join("owner.json")).unwrap(), owner);
+    assert_eq!(
+        fs::read_to_string(replacement.join("untouched")).unwrap(),
+        "B original content"
+    );
+
+    if corrupt {
+        ws.with_window(|w| {
+            w.invoke_launch();
+            assert!(w.get_status().contains("refused"));
+        });
+        assert!(ws.state.app.lock().unwrap().acquisition.launch_blocked());
+        assert!(
+            !launched.exists(),
+            "corrupt B must block a valid harmless launch target"
+        );
+        assert_eq!(fs::read_to_string(&journal).unwrap(), "B corrupt journal");
+        // Startup loads A as history asynchronously while independently recovering loaded B.
+        let next = reopen(&ws, root.path());
+        wait(&next, |w| {
+            w.installed() && w.with_acquisition(|a| !a.get_busy())
+        });
+        next.with_acquisition(|w| assert!(w.get_facts().contains("HISTORICAL")));
+        assert!(next.state.app.lock().unwrap().acquisition.launch_blocked());
+        assert_eq!(fs::read(&history).unwrap(), original);
+        assert_eq!(fs::read_to_string(&journal).unwrap(), "B corrupt journal");
+        fs::remove_file(&journal).unwrap();
+        ws.with_acquisition(|w| w.invoke_retry_recovery());
+        wait(&ws, |w| w.with_acquisition(|a| !a.get_busy()));
+        next.with_acquisition(|w| w.invoke_retry_recovery());
+        wait(&next, |w| w.with_acquisition(|a| !a.get_busy()));
+        assert!(!next.state.app.lock().unwrap().acquisition.launch_blocked());
+        assert_eq!(fs::read(&history).unwrap(), original);
+    }
+    assert!(!ws.state.app.lock().unwrap().acquisition.launch_blocked());
+    assert_eq!(
+        ws.state
+            .app
+            .lock()
+            .unwrap()
+            .acquisition
+            .recovery_root
+            .as_ref(),
+        Some(&replacement)
+    );
+    ws.with_window(|w| w.invoke_launch());
+    wait(&ws, |w| {
+        launched.exists() && w.with_window(|a| !a.get_busy_launch())
+    });
+    wait(&ws, |w| !w.state.host.known_game_running().unwrap());
+    assert_eq!(fs::read(&history).unwrap(), original);
+    assert_eq!(fs::read(home.join("owner.json")).unwrap(), owner);
+    assert_eq!(
+        fs::read_to_string(replacement.join("untouched")).unwrap(),
+        "B original content"
+    );
+}
+
 pub(super) fn acquisition_callbacks() {
+    completed_receipt_does_not_own_replacement_recovery(false);
+    completed_receipt_does_not_own_replacement_recovery(true);
     rescan_preserves_selected_copy_and_raw_tokens();
     usable_path();
     close_cancel_and_report_retry();

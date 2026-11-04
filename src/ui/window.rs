@@ -2359,6 +2359,7 @@ fn install(app: &mut App, replacement: RefreshReplacement, bootstrap: bool) {
     };
     app.session = Some(session);
     app.workflow = Some(workflow);
+    app.acquisition.retire_settled_receipt();
     app.acquisition.recovery_needed = true;
     app.acquisition.recovery_attempted = false;
     app.acquisition.recovery_root = None;

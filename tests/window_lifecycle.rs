@@ -336,6 +336,12 @@ fn open(fixture: &Fixture) -> Workspace {
             window.status_reported()
         )
     });
+    await_until(
+        "startup acquisition recovery",
+        &window,
+        Rc::new(|ws: &Workspace| ws.with_acquisition(|w| !w.get_busy())),
+    )
+    .expect("offline lifecycle actions start after real startup recovery returns");
     window
 }
 

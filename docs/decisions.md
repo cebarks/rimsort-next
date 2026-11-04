@@ -180,8 +180,12 @@ The design was revised before implementation:
   produced after backend return and installer teardown, then persisted before
   releasing launch/close. Cost: finality waits for cleanup and disk persistence,
   rather than optimistically treating a streamed success as completion.
-- D52: recovery reopens the actual captured installation through Installer and
-  refreshes observations in the same receipt. Recovery/IO failures retain every
+- D52: unresolved acquisition recovery reopens the actual captured installation
+  through Installer and refreshes observations in the same receipt. A fully
+  persisted receipt without recovery/cleanup protection is retired to history at
+  loaded-installation replacement, before scheduling that installation's recovery.
+  Replacement recovery never rewrites a retired receipt. Unresolved acquisitions
+  keep their captured-root checks and block replacement. Recovery/IO failures retain every
   requested item, and recovered installation facts never erase the original
   failed operation or download outcome. Persistence retry writes that receipt
   without another download. Cleanup uncertainty has no acknowledge-away action.

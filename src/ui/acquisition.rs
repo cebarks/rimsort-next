@@ -131,6 +131,14 @@ impl AcquisitionState {
     pub(super) fn launch_blocked(&self) -> bool {
         self.protected() || self.recovery_needed
     }
+
+    pub(super) fn retire_settled_receipt(&mut self) {
+        if !self.launch_blocked()
+            && let Some(report) = self.final_report.take()
+        {
+            self.historical = Some(report);
+        }
+    }
 }
 
 pub(super) fn register(state: &Arc<State>, window: &AcquisitionWindow) {
