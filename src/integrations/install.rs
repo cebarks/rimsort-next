@@ -345,11 +345,24 @@ impl Installer {
         updated: Option<u64>,
         cancel: &AtomicBool,
     ) -> Result<Promotion, AcquisitionError> {
+        self.promote_observed(id, source, version, updated, cancel, || {})
+    }
+    pub(crate) fn promote_observed(
+        &mut self,
+        id: PublishedFileId,
+        source: &Path,
+        version: &GameVersion,
+        updated: Option<u64>,
+        cancel: &AtomicBool,
+        publishing: impl FnOnce(),
+    ) -> Result<Promotion, AcquisitionError> {
         let journal = self.prepare(id, source, version, updated, cancel)?;
         if cancel.load(Ordering::Acquire) {
             self.recover()?;
             return Err(AcquisitionError::Cancelled);
         }
+        // Once publication starts, cancellation cannot interrupt commit/recovery.
+        publishing();
         self.publish(journal)
     }
     fn publish(&mut self, mut journal: Journal) -> Result<Promotion, AcquisitionError> {

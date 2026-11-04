@@ -61,8 +61,9 @@ use a fixture installation as well when testing.
 
 Unknown active tokens remain visible and survive faithful saves. Turning off
 content-warning confirmation does not hide findings or bypass IO failures.
-Steam/SteamCMD acquisition and conflict analysis are not implemented in this
-combined local slice. There are no acquisition placeholder controls.
+SteamCMD acquisition is available through **Acquisition**, independently of the
+local editor. Native Steam-client acquisition and conflict analysis are not
+implemented; neither has placeholder controls.
 
 ### Profiles, history and local lists
 
@@ -99,6 +100,61 @@ Profile loads/imports are guarded during Reset, workflow questions and pending
 save/launch/refresh receipts. Profile file operations also keep the application
 open until their results are consumed. Cancelled questions and failed saves
 release their ownership so later operations remain available.
+
+### Workshop acquisition with SteamCMD
+
+1. Open **Acquisition** and paste decimal IDs or canonical Steam Community
+   item/collection links, separated by whitespace. **Public preview** resolves
+   public metadata off the UI thread; collection/inaccessible/foreign-item and
+   input diagnostics stay visible. Candidates are not proof of package IDs or
+   installed copies. **Workshop in browser** opens the system browser, not a webview.
+2. Enter an absolute existing SteamCMD executable and a finite timeout in seconds
+   (default 900; range 1–86400), then **Save preferences**. No installer, credentials
+   or bootstrap is provided. Preferences are separate from the installation form
+   in `<data-dir>/acquisition-preferences.json` (schema 1). Invalid replacements
+   preserve previous settings.
+3. **Download preview candidates** captures those preferences, public metadata,
+   and the **loaded** installation's local Mods root/version. Explicitly confirm
+   the game is closed. Unsaved installation-form edits cannot redirect the request.
+   A retained direct game child prevents acquisition, without being killed.
+4. Watch separate per-item subscription, download, operation and backend/path
+   observations. A failed update can still show the old installed copy; unknown
+   freshness never means a successful update. Log retention is bounded to 1,000
+   lines/256 KiB with truncation indicated. Cancellation preserves completed facts.
+5. **Rescan library only** explicitly updates discovery without activating mods,
+   replacing working tokens, applying to game or modifying checkpoints. Existing
+   physical-copy selections survive; the acquisition facts identify a different
+   active copy using scanned package metadata. Before rescan, a newly acquired
+   copy's package identity is not guessed from its Workshop title. Ordinary
+   refresh and profile replacement remain independently guarded.
+
+SteamCMD uses `<data-dir>/acquisition-workspace` and publishes verified owned
+content to canonical `Mods/<id>`. The sibling `.rimsort-next-<Mods name>` stores
+ownership, staging, a prior verified backup and recovery intent, outside scanned
+Mods. Startup checks/reconciles existing management state off-thread before launch,
+including when Acquisition has never been opened. Unknown/corrupt state is
+preserved and blocks launch/mutation; **Retry recovery** performs real validation,
+not acknowledgement. After recovery, current verified observations are persisted
+in the same request receipt; the original failed download/operation remains a
+fact. A failed write still blocks launch/close until **Retry report write** succeeds.
+No management directory is created by checking an unmanaged installation.
+
+Close during an operation offers **Keep window open** or **Cancel operations and
+close**. The manager stays open until backend return/cleanup and durable receipt
+persistence, then uses the existing unapplied-game Close question. A streamed
+Finished event is not final: the installer may still own its lock. Failed report
+writes keep the window open; **Retry report write** retries the same receipt, not
+the download. Schema-1 `<data-dir>/last-acquisition.json` retains compact facts,
+captured source/settings and errors, bounded to 4 MiB before atomic replacement.
+On restart this is labelled historical, never current installation proof.
+
+External/detached games and Steam background activity cannot be reliably controlled.
+A macOS bundle launcher's exit is not evidence of game exit. Closing the manager
+never kills launched games. SteamCMD is a trusted manual executable, not a sandbox;
+uncertain escaped-process cleanup blocks launch/normal close. Windows acquisition
+is explicitly unavailable **before spawn** pending safe process ownership; offline
+Windows workflows remain available. Linux controlled-fixture/headless evidence is
+not live Steam/account, native-window, macOS or Windows runtime proof.
 
 ### Community sorting rules
 

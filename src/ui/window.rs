@@ -26,6 +26,11 @@
 //! guards as well as the visible controls. Reset changes only the in-memory working list.
 
 slint::include_modules!();
+#[path = "acquisition.rs"]
+mod acquisition;
+#[cfg(all(test, target_os = "linux"))]
+#[path = "../../tests/support/window_acquisition.rs"]
+mod acquisition_tests;
 #[path = "profiles.rs"]
 mod profiles;
 
@@ -273,6 +278,7 @@ struct App {
     reset: Option<(String, JobSource)>,
     reset_serial: u64,
     profiles: profiles::ProfileState,
+    acquisition: acquisition::AcquisitionState,
     /// The job behind each outstanding operation, with the identity its result has to be fed
     /// back to. A fact's job is never released by a scan cancellation.
     save: Option<(JobId, OperationId)>,
@@ -315,6 +321,7 @@ impl App {
             reset: None,
             reset_serial: 0,
             profiles: profiles::ProfileState::default(),
+            acquisition: acquisition::AcquisitionState::default(),
             save: None,
             launch: None,
             refresh: None,
@@ -808,6 +815,7 @@ struct State {
     /// that has gone away is simply not upgraded.
     window: Weak<MainWindow>,
     profiles_window: Weak<ProfilesWindow>,
+    acquisition_window: Weak<AcquisitionWindow>,
     woken: OnceLock<()>,
 }
 
@@ -826,6 +834,7 @@ pub struct Workspace {
     /// to the state, and the state holds only a weak reference to the window.
     window: Rc<MainWindow>,
     profiles_window: Rc<ProfilesWindow>,
+    acquisition_window: Rc<AcquisitionWindow>,
     state: Arc<State>,
     weak_state: std::sync::Weak<State>,
 }
@@ -835,22 +844,27 @@ impl Workspace {
     pub fn open(startup: &Startup) -> Result<Self, slint::PlatformError> {
         let window = MainWindow::new()?;
         let profiles_window = ProfilesWindow::new()?;
+        let acquisition_window = AcquisitionWindow::new()?;
         let state = Arc::new(State {
             app: Mutex::new(App::new(startup)),
             host: JobHost::new(),
             window: window.as_weak(),
             profiles_window: profiles_window.as_weak(),
+            acquisition_window: acquisition_window.as_weak(),
             woken: OnceLock::new(),
         });
         let workspace = Self {
             window: Rc::new(window),
             profiles_window: Rc::new(profiles_window),
+            acquisition_window: Rc::new(acquisition_window),
             weak_state: Arc::downgrade(&state),
             state,
         };
         workspace.register(&workspace.window);
         workspace.register_close();
         profiles::register(&workspace.state, &workspace.profiles_window);
+        acquisition::register(&workspace.state, &workspace.acquisition_window);
+        acquisition::initialize(&workspace.state);
         // Armed once, here, so every producer of a result reaches the same notice: the first
         // read, a re-read from the form, a save, a launch.
         workspace.arm_wakeup();
@@ -873,6 +887,11 @@ impl Workspace {
     /// Runs a closure against the application's checkpoint window.
     pub fn with_profiles<T>(&self, run: impl FnOnce(&ProfilesWindow) -> T) -> T {
         run(&self.profiles_window)
+    }
+
+    /// Access the strongly owned acquisition window, including its generated callbacks.
+    pub fn with_acquisition<T>(&self, run: impl FnOnce(&AcquisitionWindow) -> T) -> T {
+        run(&self.acquisition_window)
     }
 
     /// Makes the window visible. The event loop only runs while a window is, so this is
@@ -1075,6 +1094,8 @@ impl Workspace {
     fn register(&self, window: &MainWindow) {
         let state = Arc::clone(&self.state);
         window.on_open_profiles(move || profiles::open(&state));
+        let state = Arc::clone(&self.state);
+        window.on_open_acquisition(move || acquisition::open(&state));
         let state = Arc::clone(&self.state);
         window.on_show_rules(move || rules_panel(&state, true));
         let state = Arc::clone(&self.state);
@@ -1366,6 +1387,7 @@ fn deliver_state(state: &Arc<State>) {
     }
     // Fact slots may have been released by apply_delivered, but their receipts are
     // not acknowledged until reduce above. Never adopt policy between those steps.
+    acquisition::deliver(state);
     let mut app = state.app.lock().expect("state");
     apply_pending_rules(&mut app);
     let close = app.close_effect;
@@ -1402,7 +1424,8 @@ fn edit(state: &Arc<State>, change: impl FnOnce(&mut App) -> bool) {
 }
 
 fn reset_allowed(app: &App) -> bool {
-    app.session.is_some()
+    !app.acquisition.protected()
+        && app.session.is_some()
         && !app.profiles.busy
         && app.profiles.delete.is_none()
         && app.prompt.is_none()
@@ -1721,6 +1744,23 @@ fn request(state: &Arc<State>, kind: RequestKind) {
 /// governs this operation while an operation already running keeps the value it captured; a
 /// re-read uses the installed candidate unless the form explicitly named another.
 fn request_with(state: &Arc<State>, kind: RequestKind, refresh: Option<RefreshTarget>) {
+    let acquisition_blocked = {
+        let app = state.app.lock().expect("state");
+        if kind == RequestKind::Launch {
+            app.acquisition.launch_blocked()
+        } else {
+            app.acquisition.protected()
+        }
+    };
+    if acquisition_blocked {
+        let mut app = state.app.lock().expect("state");
+        app.status =
+            "Acquisition/recovery or durable receipt is unresolved; request refused".into();
+        let view = app.view();
+        drop(app);
+        paint(state, &view);
+        return;
+    }
     let blocked = {
         let app = state.app.lock().expect("state");
         app.reset.is_some() || app.profiles.busy || app.profiles.delete.is_some()
@@ -1803,6 +1843,9 @@ fn answer(state: &Arc<State>, token: &str, choice: &str) {
 
 /// Whether a close request may take the window away.
 fn close_allowed(state: &Arc<State>) -> bool {
+    if acquisition::intercept_close(state) {
+        return false;
+    }
     let blocked = {
         let app = state.app.lock().expect("state");
         app.reset.is_some() || app.profiles.busy || app.profiles.delete.is_some()
@@ -1853,6 +1896,9 @@ fn close_allowed(state: &Arc<State>) -> bool {
 }
 
 fn hide(state: &Arc<State>) {
+    if let Some(window) = state.acquisition_window.upgrade() {
+        let _ = window.hide();
+    }
     if let Some(window) = state.profiles_window.upgrade() {
         let _ = window.hide();
     }
@@ -2121,7 +2167,8 @@ fn refresh(state: &Arc<State>) {
 mod rules_race_tests;
 
 fn rules_allowed(app: &App) -> bool {
-    app.reset.is_none()
+    !app.acquisition.protected()
+        && app.reset.is_none()
         && app.prompt.is_none()
         && app.copy.is_none()
         && !app.closing
@@ -2312,6 +2359,9 @@ fn install(app: &mut App, replacement: RefreshReplacement, bootstrap: bool) {
     };
     app.session = Some(session);
     app.workflow = Some(workflow);
+    app.acquisition.recovery_needed = true;
+    app.acquisition.recovery_attempted = false;
+    app.acquisition.recovery_root = None;
     app.projection = Projection::default();
     let problems = if diagnostics.is_empty() {
         String::new()

@@ -7,16 +7,19 @@ use std::{fs, sync::mpsc, time::Duration};
 fn held_delivery_workspace(startup: &Startup) -> Workspace {
     let window = MainWindow::new().unwrap();
     let profiles_window = ProfilesWindow::new().unwrap();
+    let acquisition_window = AcquisitionWindow::new().unwrap();
     let state = Arc::new(State {
         app: Mutex::new(App::new(startup)),
         host: JobHost::new(),
         window: window.as_weak(),
         profiles_window: profiles_window.as_weak(),
+        acquisition_window: acquisition_window.as_weak(),
         woken: OnceLock::new(),
     });
     let ws = Workspace {
         window: Rc::new(window),
         profiles_window: Rc::new(profiles_window),
+        acquisition_window: Rc::new(acquisition_window),
         weak_state: Arc::downgrade(&state),
         state,
     };
@@ -66,7 +69,7 @@ fn fixture() -> (tempfile::TempDir, Startup) {
     (root, startup)
 }
 
-fn start_held_http(ws: &Workspace) -> (mpsc::Sender<()>, std::thread::JoinHandle<()>) {
+pub(super) fn start_held_http(ws: &Workspace) -> (mpsc::Sender<()>, std::thread::JoinHandle<()>) {
     let (received_tx, received_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let server = {
@@ -112,7 +115,11 @@ fn wait_for(ws: &Workspace, ready: impl Fn(&Workspace) -> bool + 'static) {
     assert!(done.get(), "callback did not complete: {}", ws.status());
 }
 
-fn finish_http(ws: &Workspace, release: mpsc::Sender<()>, server: std::thread::JoinHandle<()>) {
+pub(super) fn finish_http(
+    ws: &Workspace,
+    release: mpsc::Sender<()>,
+    server: std::thread::JoinHandle<()>,
+) {
     release.send(()).unwrap();
     wait_for(ws, |ws| !ws.with_window(|w| w.get_rules_updating()));
     server.join().unwrap();
@@ -125,6 +132,7 @@ fn profiles_idle(ws: &Workspace) {
 fn finish_jobs(ws: &Workspace) {
     assert!(ws.state.host.reap_workers().is_empty());
     ws.deliver();
+    wait_for(ws, |ws| !ws.with_acquisition(|a| a.get_busy()));
 }
 
 fn cancelled_close_releases_rules_and_profile_controls() {
@@ -605,6 +613,8 @@ fn real_http_callbacks_preserve_protected_operations_and_live_preference() {
     cache_is_adopted_by_new_and_refreshed_sessions();
     update_releases_stale_sort_and_waits_for_reset_answer();
     disabling_rules_during_real_http_update_keeps_them_disabled();
+    #[cfg(target_os = "linux")]
+    super::acquisition_tests::acquisition_callbacks();
 }
 
 fn disabling_rules_during_real_http_update_keeps_them_disabled() {

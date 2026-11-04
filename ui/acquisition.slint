@@ -1,0 +1,65 @@
+import { Button, LineEdit, TextEdit, ScrollView, GroupBox } from "std-widgets.slint";
+
+export component AcquisitionWindow inherits Window {
+    title: "Workshop acquisition — SteamCMD";
+    preferred-width: 860px;
+    preferred-height: 760px;
+    in property <bool> busy;
+    in property <bool> library-changed;
+    in property <string> status;
+    in property <string> preview-text;
+    in property <string> facts;
+    in property <string> logs;
+    in-out property <string> executable;
+    in-out property <string> timeout-seconds: "900";
+    in property <string> question-token;
+    in property <string> question;
+    in property <bool> close-question;
+    callback preview(string);
+    callback save-preferences(string, string);
+    callback acquire();
+    callback answer-question(string, string);
+    callback cancel-operation();
+    callback rescan();
+    callback retry-report();
+    callback retry-recovery();
+    callback open-workshop();
+    callback close-window();
+    VerticalLayout {
+        padding: 12px; spacing: 8px;
+        Text { text: "Backend: SteamCMD (manual executable, no login/bootstrap)"; wrap: word-wrap; }
+        Text { text: "Confirm the game is closed before each operation. External/detached games and Steam background activity cannot be reliably controlled. Windows acquisition is unavailable pending safe process startup."; wrap: word-wrap; }
+        HorizontalLayout {
+            LineEdit { text <=> root.executable; placeholder-text: "Absolute existing SteamCMD executable"; }
+            LineEdit { text <=> root.timeout-seconds; preferred-width: 90px; }
+            Button { text: "Save preferences"; enabled: !root.busy; clicked => { root.save-preferences(root.executable, root.timeout-seconds); } }
+        }
+        input := TextEdit { preferred-height: 70px; placeholder-text: "Paste IDs or canonical Steam Community item/collection links (whitespace separated)"; }
+        HorizontalLayout {
+            Button { text: "Public preview"; enabled: !root.busy; clicked => { root.preview(input.text); } }
+            Button { text: "Workshop in browser"; clicked => { root.open-workshop(); } }
+            Button { text: "Download preview candidates"; enabled: !root.busy; clicked => { root.acquire(); } }
+            Button { text: "Cancel operation"; enabled: root.busy; clicked => { root.cancel-operation(); } }
+        }
+        ScrollView { preferred-height: 130px; Text { text: root.preview-text; wrap: word-wrap; } }
+        if root.question-token != "": GroupBox {
+            title: root.close-question ? "Close during acquisition?" : "Confirm game closed";
+            VerticalLayout {
+                Text { text: root.question; wrap: word-wrap; }
+                HorizontalLayout {
+                    Button { text: root.close-question ? "Cancel operations and close" : "Game closed — proceed"; clicked => { root.answer-question(root.question-token, "confirm"); } }
+                    Button { text: root.close-question ? "Keep window open" : "Cancel"; clicked => { root.answer-question(root.question-token, "cancel"); } }
+                }
+            }
+        }
+        Text { text: root.status; wrap: word-wrap; }
+        ScrollView { Text { text: root.facts; wrap: word-wrap; } }
+        ScrollView { preferred-height: 90px; Text { text: root.logs; wrap: word-wrap; } }
+        HorizontalLayout {
+            Button { text: "Rescan library only"; enabled: root.library-changed && !root.busy; clicked => { root.rescan(); } }
+            Button { text: "Retry report write"; enabled: !root.busy; clicked => { root.retry-report(); } }
+            Button { text: "Retry recovery"; enabled: !root.busy; clicked => { root.retry-recovery(); } }
+            Button { text: "Hide acquisition"; clicked => { root.close-window(); } }
+        }
+    }
+}

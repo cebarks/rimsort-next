@@ -337,6 +337,8 @@ struct HostInner {
     results: Mutex<VecDeque<JobCompletion>>,
     /// The newest progress report any worker published.
     progress: Mutex<Option<JobProgress>>,
+    games: Mutex<Vec<std::process::Child>>,
+    launchers: Mutex<Vec<std::process::Child>>,
 }
 
 impl HostInner {
@@ -506,11 +508,42 @@ impl JobHost {
                 discarded: AtomicU64::new(0),
                 results: Mutex::new(VecDeque::new()),
                 progress: Mutex::new(None),
+                games: Mutex::new(Vec::new()),
+                launchers: Mutex::new(Vec::new()),
             }),
             workers: Mutex::new(Vec::new()),
             panicked: Mutex::new(Vec::new()),
             wake: Arc::new(WakeSlot::default()),
         }
+    }
+
+    /// Nonblocking direct-child observation. Bundle launchers are reaped separately;
+    /// their exit is never evidence that the actual game has exited. Drop never kills games.
+    pub fn known_game_running(&self) -> Result<bool, OperationFailure> {
+        fn reap(children: &Mutex<Vec<std::process::Child>>) -> Result<bool, OperationFailure> {
+            let mut children = children
+                .lock()
+                .map_err(|_| OperationFailure::new("game observation lock poisoned"))?;
+            let mut index = 0;
+            while index < children.len() {
+                match children[index]
+                    .try_wait()
+                    .map_err(|e| OperationFailure::new(e.to_string()))?
+                {
+                    Some(_) => {
+                        // try_wait already reaped it; wait reads the cached exit status.
+                        children
+                            .remove(index)
+                            .wait()
+                            .map_err(|e| OperationFailure::new(e.to_string()))?;
+                    }
+                    None => index += 1,
+                }
+            }
+            Ok(!children.is_empty())
+        }
+        reap(&self.inner.launchers)?;
+        reap(&self.inner.games)
     }
 
     /// Installs the callback a worker invokes when it posted something worth looking at.
@@ -966,16 +999,22 @@ fn run_launch(
     report.enter(JobStage::Spawning);
     JobOutcome::Launched(match spawn_launch(command) {
         Ok(child) => {
-            // Dropping the handle is the documented standard-library behavior: the process
-            // keeps running, this build neither waits for it nor kills it, and
-            // `process_id` is the identity the operating system accepted.
-            LaunchOutcome::Spawned {
-                process_id: child.id(),
-            }
+            let process_id = child.id();
+            let children = if command.program == std::path::Path::new("/usr/bin/open") {
+                &report.inner.launchers
+            } else {
+                &report.inner.games
+            };
+            HostInner::lock(children).push(child);
+            LaunchOutcome::Spawned { process_id }
         }
         Err(error) => LaunchOutcome::Failed(OperationFailure::from_error(&error)),
     })
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "../../tests/support/game_observation.rs"]
+mod game_observation_tests;
 
 #[cfg(test)]
 mod teardown_tests {
@@ -1126,6 +1165,8 @@ mod final_publication_tests {
             discarded: AtomicU64::new(0),
             results: Mutex::new(VecDeque::new()),
             progress: Mutex::new(None),
+            games: Mutex::new(Vec::new()),
+            launchers: Mutex::new(Vec::new()),
         })
     }
 
@@ -1596,6 +1637,8 @@ mod seal_race_tests {
                 discarded: AtomicU64::new(0),
                 results: Mutex::new(VecDeque::new()),
                 progress: Mutex::new(None),
+                games: Mutex::new(Vec::new()),
+                launchers: Mutex::new(Vec::new()),
             });
             let poster = Arc::clone(&inner);
             let sealing = Arc::clone(&inner);

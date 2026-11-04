@@ -10,6 +10,7 @@ import { Button, CheckBox, LineEdit, ListView, ScrollView, GroupBox } from "std-
 import { RulesPanel } from "rules.slint";
 
 export { ProfilesWindow, ProfileRow } from "profiles.slint";
+export { AcquisitionWindow } from "acquisition.slint";
 
 export struct Row {
     key: string,
@@ -115,6 +116,7 @@ export component MainWindow inherits Window {
     callback answer-reset(string, string);
     callback save();
     callback open-profiles();
+    callback open-acquisition();
     callback launch();
     callback close-window();
     callback answer-prompt(string, string);
@@ -448,6 +450,7 @@ export component MainWindow inherits Window {
                 clicked => { root.cancel-refresh(); }
             }
             Button { text: "Profiles / lists"; clicked => { root.open-profiles(); } }
+            Button { text: "Acquisition"; clicked => { root.open-acquisition(); } }
             Button {
                 text: "Reset";
                 enabled: root.reset-enabled;

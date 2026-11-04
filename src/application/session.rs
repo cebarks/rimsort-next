@@ -252,6 +252,17 @@ impl Session {
         Ok(true)
     }
 
+    /// Refreshes physical discovery without replacing game bytes, provenance, or working tokens.
+    pub(crate) fn rescan_catalog(&mut self, catalog: Catalog) {
+        for entry in self.working.iter_mut().chain(self.saved.iter_mut()) {
+            if entry.mod_id().is_none_or(|id| catalog.get(id).is_none()) {
+                *entry = catalog.resolve_token(entry.original_token());
+            }
+        }
+        self.catalog = Arc::new(catalog);
+        self.revision += 1;
+    }
+
     /// Bumped by every effective change, never by a refused or no-op command.
     #[must_use]
     pub fn revision(&self) -> u64 {

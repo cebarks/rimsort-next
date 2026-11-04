@@ -1,5 +1,6 @@
 //! Boundaries to things outside the application: files, XML, processes.
 
+pub mod acquisition_state;
 pub mod community;
 pub mod config;
 pub mod install;

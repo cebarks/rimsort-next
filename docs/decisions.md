@@ -175,3 +175,24 @@ The design was revised before implementation:
 - D49: review identified a full synchronous community sort on each validation
   repaint. Keep this as an explicit integrated performance check/caching decision
   for Task 6, not an unmeasured responsiveness success claim.
+- D51: the acquisition window owns one worker inbox with coalesced event-loop
+  notices. Streamed Finished is progress only; the authoritative receipt is
+  produced after backend return and installer teardown, then persisted before
+  releasing launch/close. Cost: finality waits for cleanup and disk persistence,
+  rather than optimistically treating a streamed success as completion.
+- D52: recovery reopens the actual captured installation through Installer and
+  refreshes observations in the same receipt. Recovery/IO failures retain every
+  requested item, and recovered installation facts never erase the original
+  failed operation or download outcome. Persistence retry writes that receipt
+  without another download. Cleanup uncertainty has no acknowledge-away action.
+- D53: explicit library rescan replaces only discovery, preserving working/saved
+  activation tokens and still-present physical selections. Different-copy
+  annotations use scanned About.xml package identity, never Workshop titles or
+  guessed package IDs. Cost: newly acquired copy comparison requires the explicit
+  rescan; no automatic activation, profile change or game save.
+- D54: keep the existing single-initialized Slint callback harness for acquisition
+  and rules/profile races. Add a crate-private publication observer after durable
+  journal preparation and the last cancellation check, preserving the public
+  Installer API. Controlled tests hold that real boundary and streamed Finished
+  separately; cancellation cannot interrupt publication. Cost: one bounded
+  progress notification per publication, not a filesystem mocking framework.

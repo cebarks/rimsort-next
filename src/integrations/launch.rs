@@ -147,9 +147,9 @@ pub fn build_launch(
 /// What dropping that handle does, and does not, do is standard-library behavior
 /// and is stated here rather than assumed: `Child::drop` closes the handles it
 /// owns and leaves the process running, so the game outlives the handle, while
-/// nothing in this build reaps it - on a Unix host the entry can stay as a zombie
-/// until this process exits, and no claim is made about session or controlling-
-/// terminal detachment beyond that. Whether the operating system accepted the
+/// the application job host retains direct children for nonblocking observation
+/// and reaping. Bundle launchers are tracked separately and never prove game exit.
+/// No claim is made about session or controlling-terminal detachment beyond that. Whether the operating system accepted the
 /// start is the whole of what success means: it is not a claim that the game
 /// loaded.
 ///

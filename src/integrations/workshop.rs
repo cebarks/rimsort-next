@@ -111,7 +111,7 @@ impl WorkshopClient {
     pub fn new() -> Self {
         Self::at("https://api.steampowered.com")
     }
-    fn at(base: &str) -> Self {
+    pub(crate) fn at(base: &str) -> Self {
         Self {
             base: base.into(),
             agent: ureq::Agent::config_builder()

@@ -202,12 +202,18 @@ pub(crate) fn run_downloads_with_updates(
                     .join("content/steamapps/workshop/content/294100")
                     .join(row.item_id.get().to_string());
                 let upstream = updated.get(&row.item_id).copied().flatten();
-                match installer.promote(
+                match installer.promote_observed(
                     row.item_id,
                     &source,
                     &config.target_version,
                     upstream,
                     cancel,
+                    || {
+                        event(AcquisitionEvent::Log(format!(
+                            "Publishing item {}",
+                            row.item_id.get()
+                        )))
+                    },
                 ) {
                     Ok(promotion) => {
                         row.outcome = ItemOutcome::Succeeded;

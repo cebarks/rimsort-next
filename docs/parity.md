@@ -32,9 +32,31 @@ These suites use isolated fixtures, not an owner's installation or account.
 `write_smoke_fixture_settings` is an ignored **fixture writer**, not a native
 window test. Native launch evidence must be recorded separately from it.
 These are headless callback/worker checks, not native-window or live-account
-proof. Steam/Workshop/SteamCMD acquisition is not integrated, and conflict
-analysis is not implemented. Community-policy conflicts are sorting diagnostics,
-not file/content conflict analysis.
+proof. SteamCMD now has a separate acquisition window; native Steam-client
+acquisition and conflict analysis remain unimplemented. Community-policy conflicts
+are sorting diagnostics, not file/content conflict analysis.
+
+## SteamCMD UI slice
+
+`tests/support/window_acquisition.rs` uses the generated callbacks with temporary
+installations, local HTTP and controlled executable fixtures. It covers preview,
+confirmation, actual publication, explicit catalog-only rescan, captured settings,
+direct-child exclusion, cancellation/Close and retry of failed history persistence.
+`tests/support/acquisition_worker.rs` holds both prepared publication and the real
+backend's streamed Finished inside installer ownership: no final receipt, history
+write, launch or hide is allowed until actual return. Recovery callbacks exercise
+an actual interrupted publication, preserve the same failed request's facts, and
+keep launch/close blocked when writing the recovered receipt fails. Selected-copy
+and raw-token preservation, same-delivery main repaint, and late close answers are
+covered by the shared callback harness. `tests/game_children.rs` checks that dropping the
+manager's job host does not kill a directly launched child.
+
+Preferences and compact history are independent schema-1 files with bounded atomic
+replacement. Startup recovery uses the loaded canonical Mods destination and
+actual Installer validation; corrupt layouts remain blocked, not acknowledged
+away. Logs are bounded; installation observations never collapse into operation
+success. Native-client UI is not part of this slice. Independent task review and
+native/live-platform evidence are separate from these controlled headless checks.
 
 ## Native helper scope and platform boundary
 
@@ -47,11 +69,11 @@ builds and the GUI dependency/link graph remain Steam-free.
 
 Per [D50](decisions.md), Windows acquisition must fail pre-spawn: audited
 `command-group` 5.0.1 and `process-wrap` 10.0.1 std paths cannot provide the required
-bounded ownership. The guards are assigned to the separate backend integration
-work and are **not delivered by this merge**. Windows offline workflows are not
-disabled; helper/protocol remain cross-platform build targets. Linux acquisition
-integration proceeds separately; macOS runtime and full Windows acquisition are
-unverified. No live-account or SDK redistribution approval is implied.
+bounded ownership. The SteamCMD backend guard is integrated; the native-adapter
+guard belongs to its separate lane and is not delivered by this UI slice. Windows
+offline workflows are not disabled; helper/protocol remain cross-platform build
+targets. Linux SteamCMD has controlled UI/backend coverage; macOS runtime and full
+Windows acquisition remain unverified. No live-account or SDK redistribution approval is implied.
 
 ## Status legend
 
@@ -91,7 +113,8 @@ unverified. No live-account or SDK redistribution approval is implied.
 | User-rule editor/import and configurable rule endpoints | not implemented | Outside the selected community-rule scope |
 | File/content conflict analysis | unimplemented | Not implied by rule-cycle or constraint diagnostics |
 | Native Steam helper and bounded protocol | Phase A implemented; Linux fake-API/no-init tested | `crates/steam-helper/tests`, `crates/steam-protocol/tests`; [accepted scope](reviews/task-5.md), no GUI integration |
-| Steam/Workshop and SteamCMD acquisition | not integrated | Separate adapter/queue/backend work; Windows pre-spawn limitation D50 |
+| Public Workshop preview and SteamCMD acquisition | UI/backend integrated; controlled headless evidence, independent review separate | `tests/support/window_acquisition.rs`, `tests/support/acquisition_worker.rs`, `tests/steamcmd.rs`, `tests/install.rs`; real filesystem/children, explicit rescan, recovery and durable close receipts; Windows pre-spawn limitation D50 |
+| Native Steam-client acquisition UI | not implemented | Separate adapter integration; no native-client placeholder buttons |
 | Git acquisition and metadata databases | not implemented | Git acquisition is outside selected basic-core scope |
 | Standalone alphabetical sorting | excluded | Explicit parity exception in `docs/design/rust-rewrite.md` |
 
