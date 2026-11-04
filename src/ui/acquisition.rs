@@ -36,7 +36,7 @@ enum WorkerRequest {
     SteamCmd(AcquisitionRequest),
     Native(SteamClientConfig),
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Progress {
     items: BTreeMap<u64, crate::application::acquisition::AcquisitionItem>,
     logs: VecDeque<String>,
@@ -84,7 +84,7 @@ impl Progress {
 }
 #[derive(Default)]
 struct Inbox {
-    progress: Progress,
+    progress: Arc<Progress>,
     terminal: Option<Message>,
 }
 enum Message {
@@ -640,7 +640,7 @@ fn run_worker(
     let previous = std::mem::take(&mut report.report.items);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         run_acquisition(request, cancel, &mut |event| {
-            inbox.lock().expect("inbox").progress.event(event);
+            Arc::make_mut(&mut inbox.lock().expect("inbox").progress).event(event);
             notify();
         })
     }));
@@ -1026,7 +1026,7 @@ pub(super) fn paint_acquisition(state: &Arc<State>) {
         .map(|(_, report)| native::question(report))
         .unwrap_or_default();
     w.set_question(format!("{question}External/detached games and Steam background activity cannot be reliably controlled. Partial preview diagnostics remain in the report.").into());
-    let progress = a.inbox.lock().expect("inbox");
+    let progress = Arc::clone(&a.inbox.lock().expect("inbox").progress);
     let report = a.final_report.as_ref().or(a.historical.as_ref());
     let (label, items) = if let Some(report) = report {
         (
@@ -1040,7 +1040,7 @@ pub(super) fn paint_acquisition(state: &Arc<State>) {
     } else {
         (
             "Operation progress (not final)",
-            progress.progress.items.values().cloned().collect(),
+            progress.items.values().cloned().collect(),
         )
     };
     let mut selected = HashMap::<_, Vec<_>>::new();
@@ -1109,7 +1109,7 @@ pub(super) fn paint_acquisition(state: &Arc<State>) {
     }
     if let Some(n) = report
         .and_then(|r| r.native.as_ref())
-        .or(progress.progress.native.as_ref())
+        .or(progress.native.as_ref())
     {
         facts.extend(native::facts(n));
     }
@@ -1120,25 +1120,15 @@ pub(super) fn paint_acquisition(state: &Arc<State>) {
     w.set_logs(
         format!(
             "{}{}",
-            if progress.progress.truncated
-                || progress
-                    .progress
-                    .streamed
-                    .as_ref()
-                    .is_some_and(|r| r.logs_truncated)
+            if progress.truncated
+                || progress.streamed.as_ref().is_some_and(|r| r.logs_truncated)
                 || report.is_some_and(|r| r.report.logs_truncated)
             {
                 "[log truncated]\n"
             } else {
                 ""
             },
-            progress
-                .progress
-                .logs
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>()
-                .join("\n")
+            progress.logs.iter().cloned().collect::<Vec<_>>().join("\n")
         )
         .into(),
     );

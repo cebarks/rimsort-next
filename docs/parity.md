@@ -73,8 +73,11 @@ runs controlled executables in `tests/native_acquisition.rs`,
 exercise generated callbacks, no-spawn warning cancellation, separate ack/observed
 facts, mixed updates, cancellation/Close, persistence-only retry, restart and
 unrelated versus covering Inspect. `tests/support/native_recovery.rs` exercises
-coexisting physical copies and byte-preserving native history across actual Mods
-recovery. Original failed process/cleanup/item evidence survives state resolution;
+coexisting physical copies, exclusion of an identity-tampered native copy after
+SteamCMD, and byte-preserving native history across actual Mods recovery.
+`tests/support/acquisition_worker.rs` holds the UI inbox during real native-worker
+cancellation/deadline checks: helper cleanup and durable facts do not await UI
+progress delivery. Original failed process/cleanup/item evidence survives state resolution;
 Download resolution requires current validated After installation, not merely a
 known subscription. The single initialized rules callback aggregate also covers
 immediate adoption after acquisition Cancel and late Keep-open with no extra wakeup.

@@ -115,7 +115,7 @@ impl NativeReport {
     }
 }
 
-fn validate_item_path(path: &Path, id: u64) -> Result<(), String> {
+pub(crate) fn validate_item_path(path: &Path, id: u64) -> Result<(), String> {
     if let Some(folder_id) = path
         .file_name()
         .and_then(|s| s.to_str())

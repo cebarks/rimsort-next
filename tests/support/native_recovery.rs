@@ -123,7 +123,157 @@ fn recovery_cannot_persist_an_unrelated_native_receipt() {
     );
 }
 
+fn steamcmd_excludes_reidentified_native_copy() {
+    let (root, ws) = acquisition_tests::fixture();
+    let bad_copy = root.path().join("native-replaced");
+    let good_copy = root.path().join("native-valid");
+    let about = "<ModMetaData><packageId>fixture.acquired</packageId></ModMetaData>";
+    for copy in [&bad_copy, &good_copy] {
+        fs::create_dir_all(copy.join("About")).unwrap();
+        fs::write(copy.join("About/About.xml"), about).unwrap();
+        fs::write(copy.join("About/PublishedFileId.txt"), "42").unwrap();
+    }
+    let game = fs::read(root.path().join("ModsConfig.xml")).unwrap();
+    let entries = ws
+        .state
+        .app
+        .lock()
+        .unwrap()
+        .session
+        .as_ref()
+        .unwrap()
+        .working_entries()
+        .to_vec();
+    let exe = fixture::helper(
+        root.path(),
+        r#"
+for phase,path in [('before','native-replaced'),('after','native-valid')]:
+ emit(dict(kind='observation',item_id=42,phase=phase,facts=dict(subscription='subscribed',install=dict(path=str(root/path),size_bytes=9,timestamp=7,freshness='current'))))
+emit(dict(kind='outcome',item_id=42,outcome='observed',detail=None))
+emit(dict(kind='terminal'))
+sys.exit(0)
+"#,
+    );
+    fixture::configure(&ws, &exe);
+    fixture::preview(&ws, &[42]);
+    fixture::start(&ws, "inspect");
+    acquisition_tests::wait(&ws, |w| w.with_acquisition(|a| !a.get_busy()));
+    let history = root.path().join("private/last-acquisition.json");
+    let original_bytes = fs::read(&history).unwrap();
+    let original: FinalReport = storage::read(&history).unwrap().unwrap();
+    assert_eq!(original.report.items[0].installations.len(), 2);
+    let original_native = original.native.as_ref().unwrap();
+    assert_eq!(
+        original_native.items[0]
+            .before
+            .as_ref()
+            .unwrap()
+            .install
+            .as_ref()
+            .unwrap()
+            .path,
+        bad_copy.to_str().unwrap()
+    );
+    assert_eq!(
+        original_native.items[0]
+            .after
+            .as_ref()
+            .unwrap()
+            .install
+            .as_ref()
+            .unwrap()
+            .path,
+        good_copy.to_str().unwrap()
+    );
+    fs::write(bad_copy.join("About/PublishedFileId.txt"), "99").unwrap();
+    ws.with_acquisition(|w| w.invoke_select_backend("steamcmd".into()));
+    acquisition_tests::prepared(&ws, root.path(), "", "900");
+    // Filesystem tampering/preview must not retroactively rewrite SDK history.
+    assert_eq!(fs::read(&history).unwrap(), original_bytes);
+    assert_eq!(
+        serde_json::to_value(
+            ws.state
+                .app
+                .lock()
+                .unwrap()
+                .acquisition
+                .final_report
+                .as_ref()
+                .unwrap()
+                .native
+                .as_ref()
+                .unwrap()
+        )
+        .unwrap(),
+        serde_json::to_value(original_native).unwrap()
+    );
+    ws.with_acquisition(|w| {
+        w.invoke_acquire();
+        assert!(!w.get_question_token().is_empty(), "{}", w.get_status());
+        w.invoke_answer_question(w.get_question_token(), "confirm".into());
+    });
+    acquisition_tests::wait(&ws, |w| w.with_acquisition(|a| !a.get_busy()));
+    let current: FinalReport = storage::read(&history).unwrap().unwrap();
+    assert_eq!(current.backend, AcquisitionBackend::SteamCmd);
+    assert!(
+        current.native.is_none(),
+        "SteamCMD must not fabricate a new SDK observation"
+    );
+    let copies = &current.report.items[0].installations;
+    assert!(
+        copies
+            .iter()
+            .any(|i| i.backend == AcquisitionBackend::SteamClient
+                && i.path == good_copy
+                && i.freshness == crate::application::acquisition::Freshness::Unknown)
+    );
+    assert!(copies.iter().any(
+        |i| i.backend == AcquisitionBackend::SteamCmd && i.path == root.path().join("Mods/42")
+    ));
+    assert_eq!(fs::read(root.path().join("ModsConfig.xml")).unwrap(), game);
+    assert_eq!(
+        ws.state
+            .app
+            .lock()
+            .unwrap()
+            .session
+            .as_ref()
+            .unwrap()
+            .working_entries(),
+        entries
+    );
+    assert!(!root.path().join("private/profiles.json").exists());
+    for (copy, id) in [(&bad_copy, "99"), (&good_copy, "42")] {
+        assert_eq!(
+            fs::read_to_string(copy.join("About/PublishedFileId.txt")).unwrap(),
+            id
+        );
+        assert_eq!(
+            fs::read_to_string(copy.join("About/About.xml")).unwrap(),
+            about
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(root.path().join("requests"))
+            .unwrap()
+            .lines()
+            .count(),
+        1,
+        "SteamCMD must not replay native effects"
+    );
+    assert!(
+        !copies.iter().any(|i| i.path == bad_copy),
+        "retained native item42 copy now identifies as99 and must not be usable"
+    );
+    assert_eq!(copies.len(), 2);
+    ws.with_acquisition(|w| {
+        assert!(!w.get_facts().contains(bad_copy.to_str().unwrap()));
+        assert!(w.get_facts().contains(good_copy.to_str().unwrap()));
+    });
+}
+
 pub(in crate::ui::window) fn callbacks() {
+    steamcmd_excludes_reidentified_native_copy();
     coexisting_copies_survive_recovery();
     recovery_cannot_persist_an_unrelated_native_receipt();
 }

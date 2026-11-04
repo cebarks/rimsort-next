@@ -87,7 +87,9 @@ Subscription, installation and operation are independent:
   A successful callback without an observed current installation is unknown.
   `installed` is SDK callback/current-state evidence only. The UI runner checks
   absolute existing paths, bounded About.xml and item identity before offering
-  usable content; failed validation does not erase the SDK evidence.
+  usable content; failed validation does not erase the SDK evidence. Retaining a
+  native copy after SteamCMD uses the same filesystem item-identity validator;
+  valid About.xml alone cannot retain a folder reidentified as another item.
   Downloads use normal priority (`download_item(id, false)`): high priority would
   suspend unrelated item downloads, which this operation does not authorize.
 - A failed update can coexist with an available old copy. `None` install means
@@ -202,7 +204,11 @@ with no helper or SDK and no SteamCMD configuration.
 `run_request` preserves accepted events through process/protocol/cancel failures,
 records compact run status and truthful cleanup, concurrently drains bounded pipes
 and applies the configured total deadline. Synchronous observer callbacks must
-return promptly; the UI observer retains progress and coalesces event-loop wakes.
+return promptly. Accepted facts stay in the worker-owned report; the UI observer
+only tries a nonblocking progress update and coalesces event-loop wakes. Contended
+intermediate updates may be skipped, never the authoritative returned/persisted
+facts. Painting takes an Arc snapshot and releases the inbox before formatting or
+Slint setters; copy-on-write keeps that snapshot stable without retaining the lock.
 OS process creation cannot be forcibly preempted. The runner keeps operation-wide
 1,000-line/256-KiB diagnostics with dropped counts, not a full log per batch.
 Cancellation terminates only the owned helper group; it does not reverse accepted

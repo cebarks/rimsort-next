@@ -204,6 +204,9 @@ pub(super) fn retain_other_copies(
                     && copy.path.is_absolute()
                     && copy.path.is_dir()
                     && crate::integrations::install::validate_about(&copy.path, &version).is_ok()
+                    && (copy.backend != AcquisitionBackend::SteamClient
+                        || native_backend::validate_item_path(&copy.path, item.item_id.get())
+                            .is_ok())
                     && !item
                         .installations
                         .iter()
@@ -239,10 +242,12 @@ pub(super) fn run_worker(
             native,
             cancel,
             &mut |event| {
-                // Only the worker inbox is touched. No filesystem, UI lock, or blocking channel send.
-                let mut sink = inbox.lock().expect("inbox");
-                let progress = sink
-                    .progress
+                // The worker-owned report already retained this event. UI progress may be
+                // skipped, but must never hold up helper cancellation or deadline checks.
+                let Ok(mut sink) = inbox.try_lock() else {
+                    return;
+                };
+                let progress = Arc::make_mut(&mut sink.progress)
                     .native
                     .get_or_insert_with(|| NativeReport::new(action, config.runtime_dir.clone()));
                 if let steam_protocol::Payload::Observation { item_id, .. } = &event.payload
@@ -275,12 +280,14 @@ pub(super) fn run_worker(
                 Some("Native worker panicked; cleanup cannot be verified".into());
         }
     }
-    if let Some(native) = &report.native {
-        let mut sink = inbox.lock().expect("inbox");
+    if let Some(native) = &report.native
+        && let Ok(mut sink) = inbox.try_lock()
+    {
+        let progress = Arc::make_mut(&mut sink.progress);
         for line in &native.diagnostics {
-            sink.progress.event(AcquisitionEvent::Log(line.clone()));
+            progress.event(AcquisitionEvent::Log(line.clone()));
         }
-        sink.progress.truncated |= native.dropped_lines != 0;
+        progress.truncated |= native.dropped_lines != 0;
     }
     retain_other_copies(&mut report, &previous);
     report.returned_at = now();
