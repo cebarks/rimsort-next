@@ -421,12 +421,13 @@ fn discover_button(
     ws: &Workspace,
     fixture: &Fixture,
     effect: impl Fn(&Workspace, &Fixture) -> bool,
-) -> (f32, f32) {
+) -> ((f32, f32), bool) {
     for &y in Y_BELTS {
         for &x in X_WIDE {
+            let warnings_before_click = warnings_checked(ws);
             click(ws, x, y);
             if effect(ws, fixture) {
-                return (x, y);
+                return ((x, y), warnings_before_click);
             }
         }
     }
@@ -561,12 +562,16 @@ fn typing_into_the_form_reaches_the_settings_service() {
         warnings_before_typing,
         "typing into the fields never moved the warning checkbox"
     );
-    let save = discover_button(&ws, &fixture, |_ws, fixture| {
+    let (save, warnings_before_save) = discover_button(&ws, &fixture, |_ws, fixture| {
         fixture.settings_bytes() != settings_at_start
     });
     // The discovery clicks can toggle the checkbox before reaching Save. Compare with the
     // state at the saving click, not the state before that pointer-driven search began.
     let warnings_at_save = warnings_checked(&ws);
+    assert_eq!(
+        warnings_at_save, warnings_before_save,
+        "Save must not toggle the checkbox"
+    );
     let saved = fixture.settings();
     assert_eq!(
         saved.game_root.as_deref(),

@@ -87,7 +87,10 @@ Subscription, installation and operation are independent:
   A successful callback without an observed current installation is unknown.
   `installed` is SDK callback/current-state evidence only. The UI runner checks
   absolute existing paths, bounded About.xml and item identity before offering
-  usable content; failed validation does not erase the SDK evidence. Retaining a
+  usable content; failed validation does not erase the SDK evidence. Download
+  usability is derived from validated Current After content, not the absence of
+  historical Before errors; both observations and all diagnostics remain visible.
+  Retaining a
   native copy after SteamCMD uses the same filesystem item-identity validator;
   valid About.xml alone cannot retain a folder reidentified as another item.
   Downloads use normal priority (`download_item(id, false)`): high priority would
@@ -189,8 +192,10 @@ Windows creation is not failure-atomic, and the audited `process-wrap` 10.0.1 st
 implementation also fails bounded ownership requirements. [D50](decisions.md)
 rules out unverified Win32 code and unsafe fallbacks. Helper/protocol remain
 cross-platform build targets; Windows offline workflows are not disabled.
-Linux has controlled fake-process/headless evidence; macOS, live Steam/account
-behavior and native-window interaction remain unverified.
+Linux has controlled fake-process/headless evidence; macOS and live Steam/account
+behavior remain unverified. Isolated graphical startup and harmless fixture launch
+are separate evidence in [verification](verification.md), not proof of real native
+Steam interactions.
 
 `SteamClientPreferences` is separate from SteamCMD's preferences. Schema-1
 `<data-dir>/steam-client.json` stores `helper_override`, `runtime_dir` (optional

@@ -476,6 +476,16 @@ fn save_receipt_precedes_rules_adoption(disable: bool) {
     });
     let bound = ws.source();
     let save = ws.state.app.lock().unwrap().save.unwrap();
+    ws.with_window(|w| {
+        w.invoke_launch();
+        w.invoke_refresh();
+        assert!(!w.get_busy_launch() && !w.get_busy_refresh());
+        assert!(w.get_busy_save());
+        assert!(!w.get_prompt_open());
+        assert!(w.window().is_visible());
+    });
+    assert_eq!(ws.state.app.lock().unwrap().save, Some(save));
+    assert!(!ws.state.app.lock().unwrap().closing);
     // The real write completes, but its fact is deliberately NOT delivered yet.
     assert!(ws.state.host.reap_workers().is_empty());
     let committed = fs::read(startup.target.settings.config_path.as_ref().unwrap()).unwrap();
@@ -600,6 +610,10 @@ fn cache_is_adopted_by_new_and_refreshed_sessions() {
     }
 }
 
+#[cfg(target_os = "linux")]
+#[path = "daily_driver.rs"]
+mod daily_driver;
+
 #[test]
 fn real_http_callbacks_preserve_protected_operations_and_live_preference() {
     i_slint_backend_testing::init_integration_test_with_system_time();
@@ -617,6 +631,8 @@ fn real_http_callbacks_preserve_protected_operations_and_live_preference() {
     super::acquisition_tests::acquisition_callbacks();
     #[cfg(target_os = "linux")]
     super::native_acquisition_tests::native_callbacks();
+    #[cfg(target_os = "linux")]
+    daily_driver::combined_daily_driver();
 }
 
 fn disabling_rules_during_real_http_update_keeps_them_disabled() {

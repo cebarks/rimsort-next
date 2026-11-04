@@ -242,3 +242,23 @@ The design was revised before implementation:
   the main window outside state locks, using the same post-receipt reconciliation
   as normal delivery. This covers Cancel and late Keep-open without a further
   worker wakeup; unrelated Workflow prompt and receipt ownership is unchanged.
+- D59: Task6 preserves historical native Before validation errors and raw SDK
+  facts, but successful Download usability requires a validated Current After
+  installation. Aggregate diagnostics are not current-installation confidence.
+  Covering pending Download Inspect also uses current validated After evidence
+  and leaves original item/acknowledgement/failed runtime records unchanged.
+- D60: the integrated daily-driver test belongs under tests/support in the
+  existing single-initialized callback harness. Private per-call HTTP and receipt
+  seams do not justify a second initializer, exported testing API or framework.
+  Real interrupted-journal recovery does not claim runtime publication-observer
+  panic coverage; that precise boundary remains static-review-only.
+- D61: the coordinator's independent whole-branch final review also fulfills
+  Task6's planned spec/quality review. The implementer supplies current gates,
+  local compilation, isolated native artifacts and integrity evidence first;
+  no self-acceptance or duplicate nested review is implied.
+- D62: measured 300-mod/299-edge synchronous validation+paint in the debug
+  headless backend over 30 calls: median6.840ms/max13.299ms. Retain the existing
+  computation rather than add unproven cache/invalidation complexity; larger
+  real lists and other event rates remain unmeasured. Isolated native screenshots
+  expose low-contrast main section labels/default-width clipping for final review,
+  not permission for unrelated cosmetic cleanup in this verification slice.

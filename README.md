@@ -1,7 +1,10 @@
 # RimSort Next
 
 A standalone native Rust/[Slint](https://slint.dev/) mod manager for one RimWorld
-installation. See [source provenance](docs/provenance.md) and the inherited GPL
+installation. The [capability ledger](docs/capabilities.md) and
+[verification record](docs/verification.md) distinguish implemented, automated,
+graphical and externally unverified behavior; [final review](docs/reviews/final-review.md)
+is pending. See [source provenance](docs/provenance.md) and the inherited GPL
 [license](LICENSE.md). The Cargo package/executable remains `rimsort-rust`.
 
 ## Prerequisites
@@ -124,7 +127,9 @@ Facts show the original action/request, independent Before/After observations,
 SDK acknowledgement, outcome, detailed failure and process/cleanup evidence.
 Acknowledgement is not observed subscription; an Installed outcome alone is not
 usable content. Existing absolute folders need valid bounded About.xml and matching
-item identity before being offered as usable. Freshness Unknown means update
+item identity before being offered as usable. Download success requires validated
+Current After content; historical Before validation errors remain visible without
+downgrading a valid After installation. Freshness Unknown means update
 unverified. Native files are never copied/promoted through SteamCMD; the two
 backend/path copies coexist without changing the active editor's selection.
 Use **Rescan library only** explicitly; configure the corresponding Workshop root

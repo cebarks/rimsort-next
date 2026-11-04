@@ -13,7 +13,9 @@ fn stream(action: Action, installed: bool) -> EventStream {
         let facts = Facts {
             subscription: Subscription::Unknown,
             install: installed.then(|| Install {
-                path: std::env::temp_dir()
+                path: std::env::current_dir()
+                    .unwrap()
+                    .join(std::env::temp_dir())
                     .join("synthetic-steam-mod")
                     .to_str()
                     .unwrap()

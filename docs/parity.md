@@ -6,6 +6,12 @@ pinned reference baseline `1e0085d58b2687a04ed86a2b0af06769c42c4708`.
 The metadata ledger below retains the inherited offline milestone's Task 1
 numbering. It is not the new basic-core Task 1 and is not a whole-parity claim.
 
+Current cross-feature proof categories and limits are authoritative in
+[capabilities](capabilities.md) and [verification](verification.md). Basic-core
+Task1–5 are scoped-accepted; [final review](reviews/final-review.md) is pending.
+The combined fixture lives in `tests/support/daily_driver.rs`, sharing the
+existing Slint initializer and private HTTP seams.
+
 ## Current combined local slice
 
 The imported workspace supplies scanning, physical-copy resolution,
@@ -136,7 +142,7 @@ Windows acquisition remain unverified. No live-account or SDK redistribution app
 | File/content conflict analysis | unimplemented | Not implied by rule-cycle or constraint diagnostics |
 | Native Steam helper and bounded protocol | Implemented; Linux fake-API/no-init tested | `crates/steam-helper/tests`, `crates/steam-protocol/tests`; [Phase A scope](reviews/task-5.md), separate executable consumed by strict adapter |
 | Public Workshop preview and SteamCMD acquisition | UI/backend integrated; controlled headless evidence, independent review separate | `tests/support/window_acquisition.rs`, `tests/support/acquisition_worker.rs`, `tests/steamcmd.rs`, `tests/install.rs`; real filesystem/children, explicit rescan, recovery and durable close receipts; Windows pre-spawn limitation D50 |
-| Native Steam-client acquisition UI | Integrated; controlled Linux/headless checks, independent acceptance separate | `tests/native_acquisition.rs`, `tests/native_failures.rs`, `tests/support/window_native_*.rs`, `tests/support/native_recovery.rs`; no live Steam/account or native-window proof |
+| Native Steam-client acquisition UI | Scoped-accepted controlled Linux/headless checks; final whole-branch review pending | `tests/native_acquisition.rs`, `tests/native_failures.rs`, `tests/support/window_native_*.rs`, `tests/support/native_recovery.rs`; no live Steam/account or native-window proof |
 | Git acquisition and metadata databases | not implemented | Git acquisition is outside selected basic-core scope |
 | Standalone alphabetical sorting | excluded | Explicit parity exception in `docs/design/rust-rewrite.md` |
 

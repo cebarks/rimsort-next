@@ -1,5 +1,13 @@
 # RimSort Next Basic Core Implementation Plan
 
+Execution status: Tasks1–5 are accepted for their controlled Linux/headless
+scopes. Task6 integrated execution precedes the coordinator's independent
+whole-branch review, which also serves as Task6's spec/quality review. This plan
+is not a completion claim: see [verification](../verification.md),
+[capabilities](../capabilities.md) and [pending final review](../reviews/final-review.md).
+Task6's combined fixture uses `tests/support/daily_driver.rs` inside the existing
+single-initialized Slint harness rather than adding public test APIs.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Work task-by-task from the extracted task brief, use TDD for new behavior, and obtain independent task review before integration. Do not dispatch nested agents.
 
 **Goal:** Deliver a native daily-driver workflow for installed mods, named profiles, community rules, SteamCMD and Steam-client acquisition in the independent private RimSort Next repository.

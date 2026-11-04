@@ -1,4 +1,12 @@
-# RimSort development build artifacts
+# RimSort Next development build artifacts
+
+This describes the preserved `.github/workflows/ci.yml` matrix and artifact
+format, not a claim that hosted CI ran. Current local evidence is in
+[verification](verification.md). CI tests/lints the workspace, but its release
+archive command builds only the default main package. Task6 additionally compiles
+`cargo build --locked --workspace --release` locally; that does not change the
+archive contents or authorize publishing the helper/Valve runtime. No SDK assets
+are bundled; see [helper prerequisites and legal limits](steam-helper.md).
 
 These archives contain an unsigned native executable, LICENSE.md, and this file
 as BUILD-NOTES.md. CI appends the commit SHA, target triple, and compiler version.

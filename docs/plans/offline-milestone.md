@@ -1,5 +1,10 @@
 # Offline Mod Management Implementation Plan
 
+Historical imported plan for the original offline milestone, not current feature
+status or permission to repeat its implementation. The standalone continuation
+uses [basic core](basic-core.md); see [current capabilities](../capabilities.md)
+and [verification](../verification.md) for delivered scope and proof boundaries.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship the first offline workflow: configure paths, discover and inspect installed mods, edit and validate the active list, topologically sort it, safely save it, and launch RimWorld.

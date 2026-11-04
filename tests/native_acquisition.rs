@@ -261,6 +261,81 @@ emit(dict(kind='terminal'))
     );
 }
 #[test]
+fn invalid_before_does_not_downgrade_current_after_or_pending_refresh() {
+    use rimsort_rust::application::acquisition::DownloadOutcome;
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir_all(root.path().join("old-invalid/About")).unwrap();
+    fs::write(root.path().join("old-invalid/About/About.xml"), "<invalid>").unwrap();
+    let about = root.path().join("new-copy/About");
+    fs::create_dir_all(&about).unwrap();
+    fs::write(
+        about.join("About.xml"),
+        "<ModMetaData><packageId>fixture.valid</packageId></ModMetaData>",
+    )
+    .unwrap();
+    fs::write(about.join("PublishedFileId.txt"), "42").unwrap();
+    let mode = r#"
+for phase in ['before','after']:
+ path = root/('old-invalid' if phase=='before' else 'new-copy')
+ emit(dict(kind='observation',item_id=42,phase=phase,facts=dict(subscription='subscribed',install=dict(path=str(path),size_bytes=1,timestamp=7,freshness='current'))))
+emit(dict(kind='outcome',item_id=42,outcome='installed' if r['action']=='download' else 'observed',detail=None))
+emit(dict(kind='terminal'))
+"#;
+    let (native, report, error) = run(root.path(), mode, &[42], Action::Download);
+    assert!(error.is_none());
+    assert_eq!(native.items[0].validation_errors.len(), 1);
+    assert!(native.items[0].validation_errors[0].contains("old-invalid"));
+    assert!(
+        native.items[0]
+            .before
+            .as_ref()
+            .unwrap()
+            .install
+            .as_ref()
+            .unwrap()
+            .path
+            .ends_with("old-invalid")
+    );
+    assert_eq!(
+        native.items[0].outcome,
+        Some(steam_protocol::Outcome::Installed)
+    );
+    assert_eq!(report.items[0].installations.len(), 1);
+    assert_eq!(report.items[0].download, DownloadOutcome::Succeeded);
+
+    let failed = COMPLETE.to_owned() + "\nsys.exit(7)\n";
+    let (original, _, error) = run(root.path(), &failed, &[42], Action::Download);
+    assert!(error.is_some() && original.uncertain());
+    let mut refreshed = NativeReport::new(Action::Inspect, None);
+    refreshed.pending = original.pending.clone();
+    let config = SteamClientConfig {
+        helper_path: helper(root.path(), mode),
+        runtime_dir: None,
+        total_deadline: Duration::from_secs(2),
+    };
+    let (_, error) = native_acquisition::run(
+        &config,
+        "refresh",
+        &[42],
+        &GameVersion::parse("1.6").unwrap(),
+        &mut refreshed,
+        &AtomicBool::new(false),
+        &mut |_| {},
+    );
+    assert!(error.is_none());
+    assert!(!refreshed.uncertain());
+    assert_eq!(refreshed.items[0].validation_errors.len(), 1);
+    assert_eq!(
+        serde_json::to_value(&refreshed.pending[0].items).unwrap(),
+        serde_json::to_value(&original.items).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(&refreshed.pending[0].runs).unwrap(),
+        serde_json::to_value(&original.runs).unwrap()
+    );
+}
+
+#[test]
 fn sdk_installed_does_not_make_invalid_or_mismatched_content_usable() {
     for metadata in [
         None,

@@ -1,4 +1,30 @@
-# Task 5 acceptance — Phase A and Phase B1
+# Task 5 acceptance — helper, process adapter and native UI
+
+## Current accepted native UI scope
+
+Coordinator scoped re-review accepted `cef01143ca97ba4870e34e92e027614b1ecc4eb0`
+(native feature parent `1c9dd5f3`) with spec/quality PASS and no new
+Critical/Important issues. Controlled Linux/headless evidence: 623 tests passed,
+0 failed, 1 existing ignored fixture writer; fmt, strict workspace Clippy,
+workspace build and main-only isolation checks passed.
+
+The generated Acquisition window now supplies explicit Inspect, Subscribe,
+warned Unsubscribe and Download, independent preferences, durable raw/runtime
+receipts, pending-effect reconciliation, explicit rescan and game/close gates.
+I1 uses nonblocking progress publication and an O(1) Arc snapshot before UI
+formatting so held UI locks cannot stall native supervision. I2 reuses the same
+item-identity validator when retaining native copies across SteamCMD requests.
+Both fixes have real controlled-process/physical-copy RED/GREEN coverage.
+M1 immediate rules adoption after Cancel/late Keep-open is closed.
+
+Minor M2 (invalid Before downgrading valid Current After) is addressed in the
+Task6 execution slice with controlled helper RED/GREEN, pending the coordinator's
+[whole-branch final review](final-review.md). Task6's native-window evidence and
+current counts are recorded separately in [verification](../verification.md).
+No real SDK initialization/account/game operations or other-platform runtime are
+accepted by this review. Windows acquisition remains disabled pre-spawn.
+
+## Historical Phase A and B1 acceptance records
 
 Accepted incoming helper/protocol: `69f26c1d51505d245a71da32ffbdca8b54b83773`,
 fixing reviewed Phase A `bf7a651db0c77f7a286e9987c87060d4aa83f402`.
@@ -130,6 +156,6 @@ contain no Steam library or RPATH/RUNPATH. Staged, unstaged and both-parent
 whitespace checks passed. These are controlled Linux/headless and fake-process
 checks, not native-window/live Steam or cross-platform runtime proof.
 
-M1 immediate rules adoption after question Cancel/late Keep-open remains deferred to Task5 native
-question-flow work. No native UI or M1 fix is part of this merge. Coordinator
-integration-only review remains required before Task5 UI wiring.
+At this historical merge, M1 and native UI were still deferred. Both were
+subsequently integrated and independently accepted in the current scope above;
+this historical record is not the current capability boundary.

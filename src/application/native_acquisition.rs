@@ -259,7 +259,13 @@ pub fn run(
                         && f.subscription != Subscription::NotSubscribed)
             });
         let mut installs: Vec<InstallObservation> = Vec::new();
-        for facts in item.before.iter().chain(item.after.iter()) {
+        let mut current_after_valid = false;
+        for (after, facts) in item
+            .before
+            .iter()
+            .map(|facts| (false, facts))
+            .chain(item.after.iter().map(|facts| (true, facts)))
+        {
             if let Some(install) = &facts.install {
                 let path = PathBuf::from(&install.path);
                 let valid = if !path.is_absolute() || !path.is_dir() {
@@ -271,6 +277,8 @@ pub fn run(
                 };
                 match valid {
                     Ok(()) => {
+                        current_after_valid |=
+                            after && install.freshness == steam_protocol::Freshness::Current;
                         installs.retain(|i| i.path != path);
                         installs.push(InstallObservation {
                             backend: AcquisitionBackend::SteamClient,
@@ -311,8 +319,7 @@ pub fn run(
             installations: installs,
             download: if report.action != Action::Download {
                 DownloadOutcome::NotStarted
-            } else if item.outcome == Some(Outcome::Installed) && item.validation_errors.is_empty()
-            {
+            } else if item.outcome == Some(Outcome::Installed) && current_after_valid {
                 DownloadOutcome::Succeeded
             } else {
                 DownloadOutcome::Unverified
