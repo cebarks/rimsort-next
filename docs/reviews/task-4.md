@@ -1,9 +1,10 @@
-# Task 4 acceptance — Phase A only
+# Task 4 acceptance — backend and SteamCMD UI
 
 Accepted backend: `5138b9a7141e755ebdd7d2155097b203874c7db5`, including fixes
 reviewed over `810c575..5138b9a`. Independent spec/quality re-review accepted
-Phase A with no remaining Critical/Important finding. This is backend acceptance,
-not full Task 4 delivery; the combined merge needs independent integration review.
+Phase A with no remaining Critical/Important finding. The accepted SteamCMD UI
+and scoped review fixes are recorded below. Combined native-adapter reconciliation
+still requires independent integration review.
 
 ## Accepted contracts and fixes
 
@@ -44,8 +45,45 @@ remains unverified. Post-cleanup sync failure uses a simulated error at the real
 recovery boundary; individual OS poll/kill/join failures are not fault-injected.
 No real SDK initialization or account mutation is part of this acceptance.
 
-No acquisition UI, confirmation/queue, game-state/launch/close interlocks, history
-integration or UI rescan delivery is claimed. Phase B must consume cleanup and
-recovery uncertainty as blocking facts. The pending native adapter is separate;
-the SteamCMD UI slice does not depend on it. Existing profile/rules callbacks and
-helper Phase A behavior remain unchanged.
+## Accepted SteamCMD UI and scoped fixes
+
+Accepted UI `6cf9078be30d1ef26c6cb4f94a754f5698ff3cb4` plus fix
+`da1f23717c10761b04480a15d240c1c9b4aa09c1` passed independent spec/quality
+re-review `ea92b23d-ed68-4db`: I1/I2 addressed, no new Critical/Important findings.
+The generated Slint Acquisition window supplies public preview, captured
+preferences and explicit confirmation, controlled backend workers, bounded
+progress/history, durable terminal receipts, retry and explicit library-only
+rescan. Active work, owned questions, cleanup/recovery uncertainty and unpersisted
+receipts protect launch, replacement and close. Streamed Finished is not terminal
+authority; returned receipts precede recovery/rules settlement and close.
+
+I1 retires only settled, persisted, unprotected receipts into historical state
+before loaded-installation replacement. Actual A-to-B Refresh/recovery scenarios
+preserve A's exact receipt bytes for clean and corrupt B; unresolved A refuses
+replacement. Captured-root validation and recovery gates are unchanged. I2 uses
+the recognized `local-mods-root` callback and immediately asserts the visible
+changed draft; a valid alternate executable and 37-second preference edit prove
+refusal/projection, unchanged saved preferences and original captured settings.
+The lifecycle fixture now waits on real asynchronous acquisition readiness, not
+bootstrap status alone; no production guard was relaxed.
+
+At the accepted fix, current jobs4 `just check` passed formatting, strict locked
+workspace Clippy, **595 tests, 0 failed, 1 existing ignored**, and workspace build.
+All **20/20** repeated lifecycle runs passed. Coverage includes post-return and
+late-success ordering, persistence failure/retry, startup recovery, selected-copy
+and raw-token preservation, repaint ordering and historical/current progress.
+This is controlled Linux temporary-filesystem/process/loopback HTTP and headless
+generated-callback evidence, not native-window, live Steam/SDK/account/game or
+macOS/Windows runtime proof. Publication-panic handling is statically reviewed,
+not runtime fault-injected. Known direct-child observation is not an external or
+detached-game lock. Windows acquisition remains pre-spawn fail-closed under D50.
+
+### Deferred M1 and native integration boundary
+
+M1 (immediate rules adoption after question Cancel or late Keep-open) remains a
+minor carry to the Task5 native question-flow slice, deliberately not fixed by
+the merge-only reconciliation. Accepted native process integration `e8279a7` is
+combined without changing accepted UI/backend bodies or adding native UI. See
+[Task5 Phase B1](task-5.md) for combined-base verification and remaining limits.
+Neither this reconciliation nor B1 claims full native acquisition/Tasks5–6
+completion; the coordinator reviews the integration-only delta first.
