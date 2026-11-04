@@ -61,9 +61,10 @@ use a fixture installation as well when testing.
 
 Unknown active tokens remain visible and survive faithful saves. Turning off
 content-warning confirmation does not hide findings or bypass IO failures.
-SteamCMD acquisition is available through **Acquisition**, independently of the
-local editor. Native Steam-client acquisition and conflict analysis are not
-implemented; neither has placeholder controls.
+SteamCMD and native Steam-client actions are available through **Acquisition**,
+independently of the local editor. Native actions have controlled Linux/headless
+coverage, not live-account proof. Conflict analysis is not implemented and has no
+placeholder control.
 
 ### Profiles, history and local lists
 
@@ -100,6 +101,53 @@ Profile loads/imports are guarded during Reset, workflow questions and pending
 save/launch/refresh receipts. Profile file operations also keep the application
 open until their results are consumed. Cancelled questions and failed saves
 release their ownership so later operations remain available.
+
+### Native Steam-client actions
+
+Select **Steam client** in **Acquisition**, resolve public candidates, then choose
+**Inspect / update check**, **Subscribe**, **Unsubscribe**, or **Download / update**.
+**Run selected native action** captures the action, preferences and loaded target
+and requires explicit game-closed confirmation. Unsubscribe additionally warns
+that subscriptions are removed but file removal is not proven. Download uses
+normal priority, never a subscribe/resubscribe shortcut. Even Inspect initializes
+Steam/presence; nothing runs automatically on startup or backend selection.
+
+Native configuration does not need SteamCMD. **Save native preferences** writes
+schema-1 `<data-dir>/steam-client.json`: optional absolute existing helper override,
+optional absolute runtime directory, and timeout seconds (default 900; 1–86400).
+Empty helper selects `rimsort-next-steam` beside the main executable; an invalid
+override is an error, not a PATH fallback. Runtime configuration affects only the
+child loader; normal HOME/XDG/Steam context is preserved. Saving preferences does
+not initialize the SDK. See [helper runtime and safety notes](docs/steam-helper.md).
+
+Facts show the original action/request, independent Before/After observations,
+SDK acknowledgement, outcome, detailed failure and process/cleanup evidence.
+Acknowledgement is not observed subscription; an Installed outcome alone is not
+usable content. Existing absolute folders need valid bounded About.xml and matching
+item identity before being offered as usable. Freshness Unknown means update
+unverified. Native files are never copied/promoted through SteamCMD; the two
+backend/path copies coexist without changing the active editor's selection.
+Use **Rescan library only** explicitly; configure the corresponding Workshop root
+for native files to appear in discovery. No acquisition activates mods.
+
+Failed/unknown effects block Launch and further mutations even when content
+warnings are off. New previews, historical display changes and unrelated Inspect
+requests cannot clear this protection. **Inspect** must cover the affected IDs
+with known After observations; pending Download additionally needs a current,
+validated matching installation. Alternatively **Acknowledge uncertainty…** asks
+for explicit acceptance, not reversal, cleanup or installation proof. Original
+failure/acknowledgement/process evidence survives reconciliation in the current
+receipt; this is bounded last-operation history, not an audit archive. Cleanup,
+Mods-journal recovery and receipt-write failures remain independent hard gates.
+Mods recovery never rewrites a native receipt or its SDK observations.
+
+Cancellation/Close stops only the owned helper, not accepted subscriptions or
+external Steam downloads. Accepted late facts are drained into the durable receipt;
+**Retry report write** never replays an operation. Restart shows historical facts
+and retains unresolved uncertainty/cleanup protection without automatically
+launching a helper. Windows acquisition is disabled before spawn; macOS and real
+Steam/account behavior remain unverified. Offline main startup needs no helper or
+SDK, and no runtime assets are bundled by this feature.
 
 ### Workshop acquisition with SteamCMD
 
@@ -200,8 +248,8 @@ There is no custom-rule editor, import, or configurable update endpoint.
 workspace crates; helper tests use fake APIs and version/invalid-input invocations,
 never a valid live-account request. Default `cargo build`, `cargo run` and
 `just build` still select only the Steam-free main application. The canonical
-`rimsort-next-steam` helper is Phase A infrastructure, not GUI acquisition; see
-[helper scope and runtime limitations](docs/steam-helper.md) and
+`rimsort-next-steam` helper is invoked only by explicitly confirmed native actions;
+see [helper scope and runtime limitations](docs/steam-helper.md) and the historical
 [Phase A acceptance](docs/reviews/task-5.md). No SDK runtime is packaged here.
 
 `just check` does not rewrite formatting. Release executables are written to

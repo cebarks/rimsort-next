@@ -615,6 +615,8 @@ fn real_http_callbacks_preserve_protected_operations_and_live_preference() {
     disabling_rules_during_real_http_update_keeps_them_disabled();
     #[cfg(target_os = "linux")]
     super::acquisition_tests::acquisition_callbacks();
+    #[cfg(target_os = "linux")]
+    super::native_acquisition_tests::native_callbacks();
 }
 
 fn disabling_rules_during_real_http_update_keeps_them_disabled() {

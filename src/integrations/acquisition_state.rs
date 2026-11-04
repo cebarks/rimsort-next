@@ -33,6 +33,58 @@ impl Preferences {
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SteamClientPreferences {
+    pub schema_version: u32,
+    pub helper_override: Option<PathBuf>,
+    pub runtime_dir: Option<PathBuf>,
+    pub timeout_seconds: u64,
+}
+impl Default for SteamClientPreferences {
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            helper_override: None,
+            runtime_dir: None,
+            timeout_seconds: 900,
+        }
+    }
+}
+impl SteamClientPreferences {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != 1 || !(1..=86400).contains(&self.timeout_seconds) {
+            return Err("Native preferences require schema 1 and timeout 1–86400 seconds".into());
+        }
+        if self
+            .helper_override
+            .as_ref()
+            .is_some_and(|p| !p.is_absolute() || !p.is_file())
+        {
+            return Err("Helper override must be an absolute existing file; no fallback".into());
+        }
+        if self
+            .runtime_dir
+            .as_ref()
+            .is_some_and(|p| !p.is_absolute() || !p.is_dir())
+        {
+            return Err(
+                "Runtime override must be an absolute existing directory; no fallback".into(),
+            );
+        }
+        Ok(())
+    }
+    pub fn config(&self, main: &Path) -> Result<super::steam_client::SteamClientConfig, String> {
+        self.validate()?;
+        Ok(super::steam_client::SteamClientConfig {
+            helper_path: match &self.helper_override {
+                Some(p) => p.clone(),
+                None => super::steam_client::sibling_helper(main).map_err(|e| e.to_string())?,
+            },
+            runtime_dir: self.runtime_dir.clone(),
+            total_deadline: std::time::Duration::from_secs(self.timeout_seconds),
+        })
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FinalReport {
     pub schema_version: u32,
     pub request_id: String,
@@ -49,6 +101,8 @@ pub struct FinalReport {
     pub preview_diagnostics: String,
     pub report: AcquisitionReport,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native: Option<crate::application::native_acquisition::NativeReport>,
 }
 
 pub fn read<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, String> {

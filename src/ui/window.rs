@@ -31,6 +31,9 @@ mod acquisition;
 #[cfg(all(test, target_os = "linux"))]
 #[path = "../../tests/support/window_acquisition.rs"]
 mod acquisition_tests;
+#[cfg(all(test, target_os = "linux"))]
+#[path = "../../tests/support/window_native_acquisition.rs"]
+mod native_acquisition_tests;
 #[path = "profiles.rs"]
 mod profiles;
 
@@ -1388,6 +1391,10 @@ fn deliver_state(state: &Arc<State>) {
     // Fact slots may have been released by apply_delivered, but their receipts are
     // not acknowledged until reduce above. Never adopt policy between those steps.
     acquisition::deliver(state);
+    reconcile_after_release(state);
+}
+
+fn reconcile_after_release(state: &Arc<State>) {
     let mut app = state.app.lock().expect("state");
     apply_pending_rules(&mut app);
     let close = app.close_effect;
@@ -1424,8 +1431,10 @@ fn edit(state: &Arc<State>, change: impl FnOnce(&mut App) -> bool) {
 }
 
 fn reset_allowed(app: &App) -> bool {
-    !app.acquisition.protected()
-        && app.session.is_some()
+    !app.acquisition.protected() && reset_context_allowed(app)
+}
+fn reset_context_allowed(app: &App) -> bool {
+    app.session.is_some()
         && !app.profiles.busy
         && app.profiles.delete.is_none()
         && app.prompt.is_none()

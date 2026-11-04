@@ -1,10 +1,20 @@
 import { Button, LineEdit, TextEdit, ScrollView, GroupBox } from "std-widgets.slint";
 
 export component AcquisitionWindow inherits Window {
-    title: "Workshop acquisition — SteamCMD";
+    title: "Workshop acquisition";
     preferred-width: 860px;
     preferred-height: 760px;
     in property <bool> busy;
+    in property <bool> native-backend;
+    in property <string> native-action: "inspect";
+    in-out property <string> helper-override;
+    in-out property <string> runtime-dir;
+    in-out property <string> native-timeout: "900";
+    in property <bool> native-uncertain;
+    callback select-backend(string);
+    callback select-action(string);
+    callback save-native-preferences(string, string, string);
+    callback acknowledge-native();
     in property <bool> library-changed;
     in property <string> status;
     in property <string> preview-text;
@@ -27,9 +37,29 @@ export component AcquisitionWindow inherits Window {
     callback close-window();
     VerticalLayout {
         padding: 12px; spacing: 8px;
-        Text { text: "Backend: SteamCMD (manual executable, no login/bootstrap)"; wrap: word-wrap; }
-        Text { text: "Confirm the game is closed before each operation. External/detached games and Steam background activity cannot be reliably controlled. Windows acquisition is unavailable pending safe process startup."; wrap: word-wrap; }
         HorizontalLayout {
+            Button { text: "SteamCMD"; enabled: !root.busy; clicked => { root.select-backend("steamcmd"); } }
+            Button { text: "Steam client"; enabled: !root.busy; clicked => { root.select-backend("steam-client"); } }
+            Text { text: root.native-backend ? "Backend: Steam client — " + root.native-action : "Backend: SteamCMD"; }
+        }
+        if root.native-backend: HorizontalLayout {
+            Button { text: "Inspect / update check"; clicked => { root.select-action("inspect"); } }
+            Button { text: "Subscribe"; clicked => { root.select-action("subscribe"); } }
+            Button { text: "Unsubscribe"; clicked => { root.select-action("unsubscribe"); } }
+            Button { text: "Download / update"; clicked => { root.select-action("download"); } }
+        }
+        if root.native-backend: HorizontalLayout {
+            LineEdit { text <=> root.helper-override; placeholder-text: "Absolute helper override (empty = sibling)"; }
+            LineEdit { text <=> root.runtime-dir; placeholder-text: "Optional absolute runtime directory"; }
+            LineEdit { text <=> root.native-timeout; preferred-width: 70px; }
+            Button { text: "Save native preferences"; enabled: !root.busy; clicked => { root.save-native-preferences(root.helper-override, root.runtime-dir, root.native-timeout); } }
+        }
+        if root.native-uncertain: HorizontalLayout {
+            Text { text: "Native effects uncertain: Launch is blocked until covering Inspect or explicit acknowledgement. No blind retry."; wrap: word-wrap; }
+            Button { text: "Acknowledge uncertainty…"; enabled: !root.busy; clicked => { root.acknowledge-native(); } }
+        }
+        Text { text: "Confirm the game is closed before each operation. External/detached games and Steam background activity cannot be reliably controlled. Windows acquisition is unavailable pending safe process startup."; wrap: word-wrap; }
+        if !root.native-backend: HorizontalLayout {
             LineEdit { text <=> root.executable; placeholder-text: "Absolute existing SteamCMD executable"; }
             LineEdit { text <=> root.timeout-seconds; preferred-width: 90px; }
             Button { text: "Save preferences"; enabled: !root.busy; clicked => { root.save-preferences(root.executable, root.timeout-seconds); } }
@@ -38,9 +68,10 @@ export component AcquisitionWindow inherits Window {
         HorizontalLayout {
             Button { text: "Public preview"; enabled: !root.busy; clicked => { root.preview(input.text); } }
             Button { text: "Workshop in browser"; clicked => { root.open-workshop(); } }
-            Button { text: "Download preview candidates"; enabled: !root.busy; clicked => { root.acquire(); } }
+            Button { text: root.native-backend ? "Run selected native action" : "Download preview candidates"; enabled: !root.busy; clicked => { root.acquire(); } }
             Button { text: "Cancel operation"; enabled: root.busy; clicked => { root.cancel-operation(); } }
         }
+        Text { text: "Cancel/close stops only the owned helper, not acknowledged subscriptions or external Steam downloads. Unsubscribe does not prove files were removed."; wrap: word-wrap; }
         ScrollView { preferred-height: 130px; Text { text: root.preview-text; wrap: word-wrap; } }
         if root.question-token != "": GroupBox {
             title: root.close-question ? "Close during acquisition?" : "Confirm game closed";

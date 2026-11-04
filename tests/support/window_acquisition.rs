@@ -65,7 +65,7 @@ fn preview(ws: &Workspace) {
         assert!(w.get_preview_text().contains("invalid"));
     });
 }
-fn preview_with(ws: &Workspace, input: &str, responses: Vec<String>) {
+pub(super) fn preview_with(ws: &Workspace, input: &str, responses: Vec<String>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let client = WorkshopClient::at(&format!("http://{}", listener.local_addr().unwrap()));
     let worker = std::thread::spawn(move || {
@@ -353,7 +353,7 @@ fn retained_child_excludes_mutation() {
     wait(&ws, |w| w.with_acquisition(|a| !a.get_busy()));
     assert!(root.path().join("Mods/42/About/About.xml").is_file());
 }
-fn reopen(ws: &Workspace, root: &std::path::Path) -> Workspace {
+pub(super) fn reopen(ws: &Workspace, root: &std::path::Path) -> Workspace {
     let settings = ws.state.app.lock().unwrap().target.settings.clone();
     let next = Workspace::open(&Startup {
         target: RefreshTarget { settings },
@@ -956,6 +956,49 @@ fn completed_receipt_does_not_own_replacement_recovery(corrupt: bool) {
         fs::read_to_string(replacement.join("untouched")).unwrap(),
         "B original content"
     );
+}
+
+pub(super) fn released_question_adopts_rules_immediately(late_keep_open: bool) -> bool {
+    let (root, ws) = fixture();
+    let release = root.path().join("release-question-worker");
+    prepared(
+        &ws,
+        root.path(),
+        &format!(
+            "import time\nwhile not pathlib.Path({:?}).exists(): time.sleep(0.01)",
+            release.to_string_lossy()
+        ),
+        "900",
+    );
+    let (http_release, server) = super::rules_race_tests::start_held_http(&ws);
+    if late_keep_open {
+        start(&ws);
+        ws.with_window(|w| w.invoke_close_window());
+    } else {
+        ws.with_acquisition(|w| w.invoke_acquire());
+    }
+    let token = ws.with_acquisition(|w| w.get_question_token());
+    assert!(!token.is_empty());
+    super::rules_race_tests::finish_http(&ws, http_release, server);
+    if late_keep_open {
+        fs::write(&release, "").unwrap();
+        wait(&ws, |w| w.with_acquisition(|a| !a.get_busy()));
+    }
+    assert!(ws.with_window(|w| w.get_rules_status().contains("pending adoption")));
+    {
+        let app = ws.state.app.lock().unwrap();
+        assert_ne!(
+            app.session.as_ref().unwrap().rules_arc(),
+            app.rules.effective()
+        );
+    }
+    // No drain, worker wakeup, Sort or unrelated callback after this answer.
+    ws.with_acquisition(|w| w.invoke_answer_question(token, "cancel".into()));
+    let repainted = !ws.with_window(|w| w.get_rules_status().contains("pending adoption"));
+    let app = ws.state.app.lock().unwrap();
+    let adopted = app.session.as_ref().unwrap().rules_arc() == app.rules.effective();
+    assert!(ws.with_window(|w| w.window().is_visible()));
+    repainted && adopted
 }
 
 pub(super) fn acquisition_callbacks() {

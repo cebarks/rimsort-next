@@ -1,5 +1,8 @@
 //! One acquisition owner. Streamed events are progress; only the post-return receipt releases it.
 #[cfg(all(test, target_os = "linux"))]
+#[path = "../../tests/support/native_recovery.rs"]
+pub(super) mod native_recovery_tests;
+#[cfg(all(test, target_os = "linux"))]
 #[path = "../../tests/support/acquisition_worker.rs"]
 pub(super) mod worker_tests;
 use super::*;
@@ -9,9 +12,10 @@ use crate::{
         run_acquisition,
     },
     integrations::{
-        acquisition_state::{self as storage, FinalReport, Preferences},
+        acquisition_state::{self as storage, FinalReport, Preferences, SteamClientPreferences},
         install::Installer,
         scan::scan_install,
+        steam_client::SteamClientConfig,
         steamcmd::SteamCmdConfig,
         workshop::{WorkshopClient, WorkshopItem, parse_id},
     },
@@ -23,6 +27,15 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+#[path = "acquisition_native.rs"]
+mod native;
+use crate::application::native_acquisition::{self as native_backend, NativeReport};
+use steam_protocol::Action;
+
+enum WorkerRequest {
+    SteamCmd(AcquisitionRequest),
+    Native(SteamClientConfig),
+}
 #[derive(Default)]
 struct Progress {
     items: BTreeMap<u64, crate::application::acquisition::AcquisitionItem>,
@@ -30,6 +43,7 @@ struct Progress {
     bytes: usize,
     truncated: bool,
     streamed: Option<AcquisitionReport>,
+    native: Option<NativeReport>,
 }
 impl Progress {
     fn event(&mut self, event: AcquisitionEvent) {
@@ -74,7 +88,13 @@ struct Inbox {
     terminal: Option<Message>,
 }
 enum Message {
-    Loaded(Option<Preferences>, Option<Box<FinalReport>>, String),
+    Loaded(
+        Option<Preferences>,
+        SteamClientPreferences,
+        Option<Box<FinalReport>>,
+        String,
+    ),
+    NativePreferences(Result<SteamClientPreferences, String>),
     Preview(Vec<WorkshopItem>, String),
     Preferences(Result<Preferences, String>),
     Recovery(Box<RecoveryReceipt>),
@@ -91,7 +111,8 @@ struct RecoveryReceipt {
 struct Question {
     token: String,
     close: bool,
-    request: Option<(AcquisitionRequest, FinalReport)>,
+    request: Option<(WorkerRequest, FinalReport)>,
+    acknowledge: bool,
 }
 #[derive(Default)]
 pub(super) struct AcquisitionState {
@@ -105,6 +126,9 @@ pub(super) struct AcquisitionState {
     initialized: bool,
     root: Option<PathBuf>,
     preferences: Option<Preferences>,
+    native_preferences: SteamClientPreferences,
+    native_selected: bool,
+    native_action: Option<Action>,
     candidates: Vec<WorkshopItem>,
     preview: String,
     note: String,
@@ -118,7 +142,14 @@ pub(super) struct AcquisitionState {
     notice: Arc<AtomicBool>,
 }
 impl AcquisitionState {
-    pub(super) fn protected(&self) -> bool {
+    fn native_uncertain(&self) -> bool {
+        self.final_report
+            .as_ref()
+            .or(self.historical.as_ref())
+            .and_then(|r| r.native.as_ref())
+            .is_some_and(NativeReport::uncertain)
+    }
+    fn hard_protected(&self) -> bool {
         (self.busy && self.blocking)
             || self.close_pending
             || self.question.is_some()
@@ -127,6 +158,13 @@ impl AcquisitionState {
                     || r.report.cleanup_error.is_some()
                     || r.report.recovery_required.is_some()
             })
+            || self.historical.as_ref().is_some_and(|r| {
+                r.native.is_some()
+                    && (r.report.cleanup_error.is_some() || r.report.recovery_required.is_some())
+            })
+    }
+    pub(super) fn protected(&self) -> bool {
+        self.hard_protected() || self.native_uncertain()
     }
     pub(super) fn launch_blocked(&self) -> bool {
         self.protected() || self.recovery_needed
@@ -142,6 +180,7 @@ impl AcquisitionState {
 }
 
 pub(super) fn register(state: &Arc<State>, window: &AcquisitionWindow) {
+    native::register(state, window);
     let s = state.clone();
     window.on_preview(move |text| preview(&s, &text, Arc::new(WorkshopClient::new())));
     let s = state.clone();
@@ -283,7 +322,26 @@ pub(super) fn initialize(state: &Arc<State>) {
                 None
             }
         };
-        Message::Loaded(preferences, history.map(Box::new), notes.join("\n"))
+        let native_preferences =
+            match storage::read::<SteamClientPreferences>(&path.join("steam-client.json")) {
+                Ok(Some(p)) => {
+                    if let Err(e) = p.validate() {
+                        notes.push(e);
+                    }
+                    p
+                }
+                Ok(None) => SteamClientPreferences::default(),
+                Err(e) => {
+                    notes.push(e);
+                    SteamClientPreferences::default()
+                }
+            };
+        Message::Loaded(
+            preferences,
+            native_preferences,
+            history.map(Box::new),
+            notes.join("\n"),
+        )
     });
 }
 pub(super) fn preview(state: &Arc<State>, text: &str, client: Arc<WorkshopClient>) {
@@ -291,7 +349,7 @@ pub(super) fn preview(state: &Arc<State>, text: &str, client: Arc<WorkshopClient
     let mut errors = Vec::new();
     {
         let app = state.app.lock().expect("state");
-        if app.acquisition.busy || app.acquisition.protected() {
+        if app.acquisition.busy || app.acquisition.hard_protected() {
             return;
         }
     }
@@ -321,7 +379,7 @@ pub(super) fn preview(state: &Arc<State>, text: &str, client: Arc<WorkshopClient
                 .map(|c| format!("Collection {}: {}", c.id.get(), c.title)),
         );
         let text = format!(
-            "SteamCMD candidates (not proof of package ID/installed copy):\n{}\nDiagnostics / collections:\n{}",
+            "Workshop candidates (not proof of package ID/installed copy):\n{}\nDiagnostics / collections:\n{}",
             preview
                 .items
                 .iter()
@@ -371,7 +429,7 @@ fn now() -> Option<u64> {
 fn acquire(state: &Arc<State>) {
     let mut app = state.app.lock().expect("state");
     let result = (|| {
-        if !available(&app) {
+        if !native::request_available(&app) {
             return Err("Wait for operations/recovery and answer pending questions first".into());
         }
         match state.host.known_game_running() {
@@ -382,10 +440,7 @@ fn acquire(state: &Arc<State>) {
             Err(e) => return Err(format!("Cannot observe launched game: {e:?}")),
         }
         let a = &app.acquisition;
-        let p = a
-            .preferences
-            .as_ref()
-            .ok_or("Save valid acquisition preferences first")?;
+
         let mods_root = a
             .recovery_root
             .clone()
@@ -398,12 +453,60 @@ fn acquire(state: &Arc<State>) {
         if a.candidates.is_empty() {
             return Err("Resolve public item candidates first".into());
         }
-        let config = SteamCmdConfig {
-            executable: p.executable.clone(),
-            workspace: root.join("acquisition-workspace"),
-            mods_root: mods_root.clone(),
-            target_version: session.target_version().clone(),
-            batch_timeout: Duration::from_secs(p.timeout_seconds),
+        let (request, executable, timeout_seconds, native) = if a.native_selected {
+            if cfg!(windows) {
+                return Err(
+                    "Windows native acquisition unavailable pending ownership-safe startup".into(),
+                );
+            }
+            let config = a
+                .native_preferences
+                .config(&std::env::current_exe().map_err(|e| e.to_string())?)?;
+            let executable = config.helper_path.clone();
+            let mut native = NativeReport::new(
+                a.native_action.unwrap_or(Action::Inspect),
+                config.runtime_dir.clone(),
+            );
+            if let Some(old) = a
+                .final_report
+                .as_ref()
+                .or(a.historical.as_ref())
+                .and_then(|r| r.native.as_ref())
+            {
+                native.pending = old
+                    .pending
+                    .iter()
+                    .filter(|p| p.resolved_by.is_none())
+                    .cloned()
+                    .collect();
+            }
+            (
+                WorkerRequest::Native(config),
+                executable,
+                a.native_preferences.timeout_seconds,
+                Some(native),
+            )
+        } else {
+            let p = a
+                .preferences
+                .as_ref()
+                .ok_or("Save valid acquisition preferences first")?;
+            let config = SteamCmdConfig {
+                executable: p.executable.clone(),
+                workspace: root.join("acquisition-workspace"),
+                mods_root: mods_root.clone(),
+                target_version: session.target_version().clone(),
+                batch_timeout: Duration::from_secs(p.timeout_seconds),
+            };
+            (
+                WorkerRequest::SteamCmd(AcquisitionRequest {
+                    config,
+                    items: a.candidates.clone(),
+                }),
+                p.executable.clone(),
+                p.timeout_seconds,
+                None,
+            )
         };
         let source = JobSource::of(session);
         let report = FinalReport {
@@ -416,25 +519,33 @@ fn acquire(state: &Arc<State>) {
             ),
             source_generation: source.generation,
             source_revision: source.revision,
-            backend: AcquisitionBackend::SteamCmd,
-            mods_root,
-            executable: p.executable.clone(),
-            timeout_seconds: p.timeout_seconds,
+            backend: if a.native_selected {
+                AcquisitionBackend::SteamClient
+            } else {
+                AcquisitionBackend::SteamCmd
+            },
+            mods_root: mods_root.clone(),
+            executable,
+            timeout_seconds,
             target_version: session.target_version().to_string(),
             requested_at: now(),
             returned_at: None,
             candidates: a.candidates.clone(),
             preview_diagnostics: a.preview.clone(),
-            report: AcquisitionReport::default(),
-            error: None,
-        };
-        Ok((
-            AcquisitionRequest {
-                config,
-                items: a.candidates.clone(),
+            report: AcquisitionReport {
+                items: a
+                    .final_report
+                    .as_ref()
+                    .or(a.historical.as_ref())
+                    .filter(|r| r.mods_root == mods_root)
+                    .map(|r| r.report.items.clone())
+                    .unwrap_or_default(),
+                ..AcquisitionReport::default()
             },
-            report,
-        ))
+            error: None,
+            native,
+        };
+        Ok((request, report))
     })();
     match result {
         Ok(request) => {
@@ -442,6 +553,7 @@ fn acquire(state: &Arc<State>) {
             app.acquisition.question = Some(Question {
                 token: format!("acquire-{}", app.acquisition.serial),
                 close: false,
+                acknowledge: false,
                 request: Some(request),
             });
         }
@@ -466,6 +578,7 @@ fn answer_question(state: &Arc<State>, token: &str, answer: &str) {
     let question = app.acquisition.question.take().expect("checked");
     if answer == "cancel" {
         drop(app);
+        reconcile_after_release(state);
         paint_acquisition(state);
         return;
     }
@@ -474,9 +587,14 @@ fn answer_question(state: &Arc<State>, token: &str, answer: &str) {
         app.acquisition.cancel.store(true, Ordering::Relaxed);
         drop(app);
         deliver(state);
+        reconcile_after_release(state);
         return;
     }
-    if !available(&app) || !matches!(state.host.known_game_running(), Ok(false)) {
+    if question.acknowledge {
+        native::acknowledge(state, app);
+        return;
+    }
+    if !native::request_available(&app) || !matches!(state.host.known_game_running(), Ok(false)) {
         app.acquisition.note =
             "Operation refused: protected state or known game observation".into();
         drop(app);
@@ -506,13 +624,20 @@ fn answer_question(state: &Arc<State>, token: &str, answer: &str) {
     });
 }
 fn run_worker(
-    request: &AcquisitionRequest,
+    request: &WorkerRequest,
     mut report: FinalReport,
     cancel: &AtomicBool,
     path: &Path,
     inbox: &Mutex<Inbox>,
     notify: impl Fn(),
 ) -> Message {
+    if let WorkerRequest::Native(config) = request {
+        return native::run_worker(config, report, cancel, path, inbox, notify);
+    }
+    let WorkerRequest::SteamCmd(request) = request else {
+        unreachable!()
+    };
+    let previous = std::mem::take(&mut report.report.items);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         run_acquisition(request, cancel, &mut |event| {
             inbox.lock().expect("inbox").progress.event(event);
@@ -561,6 +686,7 @@ fn run_worker(
             });
         }
     }
+    native::retain_other_copies(&mut report, &previous);
     report.returned_at = now();
     report.report.logs_truncated |= inbox.lock().expect("inbox").progress.truncated;
     report.report.logs.clear();
@@ -592,7 +718,11 @@ pub(super) fn recover(state: &Arc<State>) {
         (
             app.target.settings.clone(),
             app.basis.clone(),
-            app.acquisition.final_report.clone(),
+            app.acquisition
+                .final_report
+                .as_ref()
+                .filter(|r| r.backend == AcquisitionBackend::SteamCmd)
+                .cloned(),
             app.acquisition
                 .root
                 .as_ref()
@@ -652,7 +782,8 @@ fn recover_root(
             let mut installer = Installer::open(&root).map_err(|e| e.to_string())?;
             if let Some(report) = report.as_mut() {
                 for item in &mut report.report.items {
-                    item.installations.clear();
+                    item.installations
+                        .retain(|copy| copy.backend != AcquisitionBackend::SteamCmd);
                     if let Some(record) = installer
                         .observation(item.item_id)
                         .map_err(|e| e.to_string())?
@@ -718,7 +849,7 @@ fn rescan(state: &Arc<State>) {
 }
 pub(super) fn intercept_close(state: &Arc<State>) -> bool {
     let mut app = state.app.lock().expect("state");
-    if !app.acquisition.protected() {
+    if !app.acquisition.hard_protected() {
         return false;
     }
     if app.acquisition.busy && !app.acquisition.close_pending {
@@ -726,6 +857,7 @@ pub(super) fn intercept_close(state: &Arc<State>) -> bool {
         app.acquisition.question = Some(Question {
             token: format!("acquisition-close-{}", app.acquisition.serial),
             close: true,
+            acknowledge: false,
             request: None,
         });
     } else {
@@ -745,8 +877,16 @@ pub(super) fn deliver(state: &Arc<State>) {
         let mut app = state.app.lock().expect("state");
         app.acquisition.busy = false;
         match message {
-            Message::Loaded(p, h, n) => {
+            Message::NativePreferences(result) => match result {
+                Ok(p) => {
+                    app.acquisition.native_preferences = p;
+                    app.acquisition.note = "Native preferences saved (SDK not initialized)".into();
+                }
+                Err(e) => app.acquisition.note = e,
+            },
+            Message::Loaded(p, native, h, n) => {
                 app.acquisition.preferences = p;
+                app.acquisition.native_preferences = native;
                 app.acquisition.historical = h.map(|report| *report);
                 app.acquisition.note = n;
             }
@@ -868,6 +1008,7 @@ pub(super) fn paint_acquisition(state: &Arc<State>) {
     };
     let app = state.app.lock().expect("state");
     let a = &app.acquisition;
+    native::paint(a, &w);
     w.set_busy(a.busy);
     w.set_library_changed(a.library_changed);
     w.set_status(a.note.as_str().into());
@@ -882,16 +1023,7 @@ pub(super) fn paint_acquisition(state: &Arc<State>) {
         .question
         .as_ref()
         .and_then(|q| q.request.as_ref())
-        .map(|(request, _)| {
-            format!(
-                "SteamCMD: {}\nDestination: {}\nTarget: {}; deadline: {} seconds; {} candidates.\n",
-                request.config.executable.display(),
-                request.config.mods_root.display(),
-                request.config.target_version,
-                request.config.batch_timeout.as_secs(),
-                request.items.len()
-            )
-        })
+        .map(|(_, report)| native::question(report))
         .unwrap_or_default();
     w.set_question(format!("{question}External/detached games and Steam background activity cannot be reliably controlled. Partial preview diagnostics remain in the report.").into());
     let progress = a.inbox.lock().expect("inbox");
@@ -974,6 +1106,15 @@ pub(super) fn paint_acquisition(state: &Arc<State>) {
         facts.extend(r.report.warnings.clone());
         facts.extend(r.report.cleanup_error.iter().cloned());
         facts.extend(r.report.recovery_required.iter().cloned());
+    }
+    if let Some(n) = report
+        .and_then(|r| r.native.as_ref())
+        .or(progress.progress.native.as_ref())
+    {
+        facts.extend(native::facts(n));
+    }
+    if a.question.as_ref().is_some_and(|q| q.acknowledge) {
+        w.set_question("Acknowledge unresolved native effects? This does NOT undo subscriptions, stop external downloads, verify cleanup or repair journals. Original facts remain in the durable report.".into());
     }
     w.set_facts(facts.join("\n").into());
     w.set_logs(

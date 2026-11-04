@@ -32,8 +32,8 @@ These suites use isolated fixtures, not an owner's installation or account.
 `write_smoke_fixture_settings` is an ignored **fixture writer**, not a native
 window test. Native launch evidence must be recorded separately from it.
 These are headless callback/worker checks, not native-window or live-account
-proof. SteamCMD now has a separate acquisition window; native Steam-client
-acquisition and conflict analysis remain unimplemented. Community-policy conflicts
+proof. SteamCMD and native Steam-client actions share the acquisition window;
+conflict analysis remains unimplemented. Community-policy conflicts
 are sorting diagnostics, not file/content conflict analysis.
 
 ## SteamCMD UI slice
@@ -62,19 +62,34 @@ away. Logs are bounded; installation observations never collapse into operation
 success. Native-client UI is not part of this slice. Independent task review and
 native/live-platform evidence are separate from these controlled headless checks.
 
-## Native helper scope and platform boundary
+## Native Steam-client UI and helper boundary
 
-The accepted [Task 5 Phase A](reviews/task-5.md) supplies the standalone
-`rimsort-next-steam` executable and bounded protocol, not acquisition UI or a
-supervising adapter. Fake-API/protocol tests cover independent observations and
+The shared acquisition owner now offers explicit Inspect, Subscribe, warned
+Unsubscribe and Download/update, independent native preferences, bounded
+last-operation receipts and uncertainty/restart gates. The real strict adapter
+runs controlled executables in `tests/native_acquisition.rs`,
+`tests/native_failures.rs` and `tests/steam_client.rs`.
+`tests/support/window_native_acquisition.rs` and `window_native_lifecycle.rs`
+exercise generated callbacks, no-spawn warning cancellation, separate ack/observed
+facts, mixed updates, cancellation/Close, persistence-only retry, restart and
+unrelated versus covering Inspect. `tests/support/native_recovery.rs` exercises
+coexisting physical copies and byte-preserving native history across actual Mods
+recovery. Original failed process/cleanup/item evidence survives state resolution;
+Download resolution requires current validated After installation, not merely a
+known subscription. The single initialized rules callback aggregate also covers
+immediate adoption after acquisition Cancel and late Keep-open with no extra wakeup.
+
+The accepted [Task 5 Phase A](reviews/task-5.md) supplied the standalone
+`rimsort-next-steam` executable and bounded protocol; the integrated process
+adapter and UI now consume that boundary without linking the SDK into main. Fake-API/protocol tests cover independent observations and
 acknowledgements, bounded failure details, callback ordering and incomplete EOF.
 Linux version/invalid-input runtime checks do not initialize Steam. Main-only
 builds and the GUI dependency/link graph remain Steam-free.
 
 Per [D50](decisions.md), Windows acquisition must fail pre-spawn: audited
 `command-group` 5.0.1 and `process-wrap` 10.0.1 std paths cannot provide the required
-bounded ownership. The SteamCMD backend guard is integrated; the native-adapter
-guard belongs to its separate lane and is not delivered by this UI slice. Windows
+bounded ownership. The SteamCMD backend guard and native-adapter
+guard are integrated; both refuse Windows operations before spawning. Windows
 offline workflows are not disabled; helper/protocol remain cross-platform build
 targets. Linux SteamCMD has controlled UI/backend coverage; macOS runtime and full
 Windows acquisition remain unverified. No live-account or SDK redistribution approval is implied.
@@ -116,9 +131,9 @@ Windows acquisition remain unverified. No live-account or SDK redistribution app
 | Community cache, `loadTop`/`loadBottom` and four-tier sorting | implemented; headless tested | `tests/community.rs`, `tests/community_sorting.rs`, `tests/window_rules.rs`; toggle/deferred adoption in `tests/support/window_rules_race.rs` |
 | User-rule editor/import and configurable rule endpoints | not implemented | Outside the selected community-rule scope |
 | File/content conflict analysis | unimplemented | Not implied by rule-cycle or constraint diagnostics |
-| Native Steam helper and bounded protocol | Phase A implemented; Linux fake-API/no-init tested | `crates/steam-helper/tests`, `crates/steam-protocol/tests`; [accepted scope](reviews/task-5.md), no GUI integration |
+| Native Steam helper and bounded protocol | Implemented; Linux fake-API/no-init tested | `crates/steam-helper/tests`, `crates/steam-protocol/tests`; [Phase A scope](reviews/task-5.md), separate executable consumed by strict adapter |
 | Public Workshop preview and SteamCMD acquisition | UI/backend integrated; controlled headless evidence, independent review separate | `tests/support/window_acquisition.rs`, `tests/support/acquisition_worker.rs`, `tests/steamcmd.rs`, `tests/install.rs`; real filesystem/children, explicit rescan, recovery and durable close receipts; Windows pre-spawn limitation D50 |
-| Native Steam-client acquisition UI | not implemented | Separate adapter integration; no native-client placeholder buttons |
+| Native Steam-client acquisition UI | Integrated; controlled Linux/headless checks, independent acceptance separate | `tests/native_acquisition.rs`, `tests/native_failures.rs`, `tests/support/window_native_*.rs`, `tests/support/native_recovery.rs`; no live Steam/account or native-window proof |
 | Git acquisition and metadata databases | not implemented | Git acquisition is outside selected basic-core scope |
 | Standalone alphabetical sorting | excluded | Explicit parity exception in `docs/design/rust-rewrite.md` |
 

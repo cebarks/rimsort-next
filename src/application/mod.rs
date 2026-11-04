@@ -8,6 +8,7 @@
 
 pub mod acquisition;
 pub mod jobs;
+pub mod native_acquisition;
 pub mod session;
 pub mod workflow;
 

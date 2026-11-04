@@ -1,11 +1,12 @@
-# Native Steam helper (Phase A)
+# Native Steam helper and acquisition integration
 
-This is a separate executable, not GUI integration. The main package has no
-Steamworks dependency; the workspace defaults to the main package. Only explicit
-workspace builds or `-p steam-helper` build the helper. The canonical binary is
-`rimsort-next-steam` (`rimsort-next-steam.exe` on Windows); the package/library
-remain `steam-helper`/`steam_helper`. Phase B must add process
-supervision, cancellation, queue/UI wiring and the game-running interlock.
+The helper is a separate executable, supervised by the main application's
+acquisition queue. The main package has no Steamworks dependency; the workspace
+defaults to the main package. Only explicit workspace builds or `-p steam-helper`
+build the helper. The canonical binary is `rimsort-next-steam`
+(`rimsort-next-steam.exe` on Windows); the package/library remain
+`steam-helper`/`steam_helper`. The UI supplies explicit confirmation, cancellation,
+durable receipts and the game-running interlock; no helper runs on startup.
 
 ## Safety and wire contract
 
@@ -25,8 +26,8 @@ including whitespace. Example wire shape (do not execute as a smoke test):
 Allowed actions: `inspect`, `subscribe`, `unsubscribe`, `download`. Request IDs
 are 1–128 ASCII alphanumeric, dash, underscore or dot characters. IDs are positive
 `u64` integers, distinct, with 1–20 items per request. Unknown fields/actions,
-foreign app IDs and unsupported schemas fail before initialization. Split larger
-jobs in the future adapter; never run more than 20 native calls per helper.
+foreign app IDs and unsupported schemas fail before initialization. The UI runner
+splits larger jobs into batches of at most 20 native calls per helper.
 Before any item mutation the helper queries native UGC metadata and checks the
 returned item ID, consumer app 294100, community-file type and banned status.
 Collections and unverified identities cannot be mutated.
@@ -44,8 +45,8 @@ and wall time; endlessly repeated short diagnostics are not bounded by line size
 
 Outcome payloads carry `item_id`, `outcome` and `detail`. Failed and unknown
 outcomes require a structured failure detail; observed, acknowledged and installed
-outcomes must not carry one (`null` or omitted). Schema remains 1; no GUI consumes
-this unreleased contract yet. Detail fields are strictly `stage`, `kind`, `message`:
+outcomes must not carry one (`null` or omitted). Schema remains 1; the strict GUI
+adapter consumes it. Detail fields are strictly `stage`, `kind`, `message`:
 
 | Stage | Kind | Meaning |
 | --- | --- | --- |
@@ -84,8 +85,9 @@ Subscription, installation and operation are independent:
   copy may remain after unsubscribe.
 - Download completion must match app/item/action and an already-running operation.
   A successful callback without an observed current installation is unknown.
-  `installed` is SDK callback/current-state evidence only. Phase B must verify
-  usable installed metadata and path before claiming game-visible availability.
+  `installed` is SDK callback/current-state evidence only. The UI runner checks
+  absolute existing paths, bounded About.xml and item identity before offering
+  usable content; failed validation does not erase the SDK evidence.
   Downloads use normal priority (`download_item(id, false)`): high priority would
   suspend unrelated item downloads, which this operation does not authorize.
 - A failed update can coexist with an available old copy. `None` install means
@@ -144,7 +146,8 @@ Verified against the published 0.13.0 source and local build-script output:
   packaging still requires license review; macOS/Windows behavior is not verified
   by the Linux tests. ELF inspection verifies actual Linux dynamic linkage.
 - Missing runtime can prevent even `--version` from starting; that is an OS loader
-  failure, not SDK initialization. Phase B must handle this like a missing helper.
+  failure, not SDK initialization. The adapter retains it as process-failure
+  evidence, independently of any accepted item events.
   The main executable's dependency graph and native linkage exclude Steamworks.
 
 Linux verification for this phase: `readelf -d target/debug/rimsort-next-steam`
@@ -177,26 +180,48 @@ review the applicable Valve SDK redistribution terms and required notices before
 packaging the helper with native libraries. License clearance and live-account
 proof are still outstanding, not implied by successful compilation.
 
-## Phase B integration obligations
+## Integrated process and UI contract
 
-Windows acquisition must fail before spawning a helper or SteamCMD backend:
-`command-group` 5.0.1 Windows creation is not failure-atomic, and the audited
-`process-wrap` 10.0.1 std implementation also fails bounded ownership requirements.
-[D50](decisions.md) rules out unverified bespoke Win32 code and unsafe fallbacks.
-The guards belong to separate backend work, not this Phase A merge. Helper and
-protocol remain cross-platform build targets; Windows offline local workflows
-are not disabled. Linux acquisition integration proceeds separately; macOS
-runtime and full Windows acquisition remain unverified.
+Windows acquisition fails before spawning either backend: `command-group` 5.0.1
+Windows creation is not failure-atomic, and the audited `process-wrap` 10.0.1 std
+implementation also fails bounded ownership requirements. [D50](decisions.md)
+rules out unverified Win32 code and unsafe fallbacks. Helper/protocol remain
+cross-platform build targets; Windows offline workflows are not disabled.
+Linux has controlled fake-process/headless evidence; macOS, live Steam/account
+behavior and native-window interaction remain unverified.
 
-Use a configured absolute helper path or the sibling `rimsort-next-steam`
-(`rimsort-next-steam.exe` on Windows), never a shell/PATH search or executable
-supplied by a mod. Do not fall back to the old `steam-helper` artifact name. Own the helper process group;
-on cancel terminate that group, preserve all validated facts, mark unfinished
-items unknown, and inspect before retry. Enforce a wall-clock deadline covering
-spawn/input/init/output in addition to the helper's post-init timer. Bound total
-output, drain both pipes and never block the GUI. Test absent runtime/executable,
-crashes, malformed/oversized output, per-item failures and cancellation with fake
-helper processes. Verify the installed path and usable RimWorld metadata before
-promoting SDK `installed` evidence to game-visible availability. Wire the reviewed
-Task 4 acquisition model and game-launch interlock before exposing mutations. No Phase A code activates content or launches
-the game. Phase A is not delivery of full Task 5.
+`SteamClientPreferences` is separate from SteamCMD's preferences. Schema-1
+`<data-dir>/steam-client.json` stores `helper_override`, `runtime_dir` (optional
+absolute paths) and `timeout_seconds` (default900, range1–86400). Empty helper uses
+pure sibling discovery; invalid overrides fail without PATH/cache fallback.
+The child inherits normal HOME/XDG/Steam context. Runtime override affects only
+its loader environment; no parent environment or runtime assets are modified.
+The adapter removes child preload-injection variables. Main still starts offline
+with no helper or SDK and no SteamCMD configuration.
+
+`run_request` preserves accepted events through process/protocol/cancel failures,
+records compact run status and truthful cleanup, concurrently drains bounded pipes
+and applies the configured total deadline. Synchronous observer callbacks must
+return promptly; the UI observer retains progress and coalesces event-loop wakes.
+OS process creation cannot be forcibly preempted. The runner keeps operation-wide
+1,000-line/256-KiB diagnostics with dropped counts, not a full log per batch.
+Cancellation terminates only the owned helper group; it does not reverse accepted
+subscriptions or stop the external Steam queue. Escaped pipe holders can leave
+bounded detached IO workers; cleanup uncertainty remains a hard gate.
+
+The shared UI owner captures the selected action and source, confirms game closed,
+warns before Unsubscribe, and persists the post-return `FinalReport` atomically.
+Optional `native` evidence keeps action/runtime, per-item Before/After, independent
+acknowledgement/outcome/detail, compact NativeRun records and pending original
+request snapshots. Pending snapshots retain original items/runs through unresolved
+and covering Inspect/explicit acknowledgement; missing legacy runs deserialize
+empty, never invented. Only prior unresolved effects enter a subsequent operation,
+so resolved receipts do not recursively accumulate history. A covering Inspect
+requires all affected item IDs and known After observations; Download also needs
+current, validated installation evidence. Resolution never changes the original
+failed/unknown operation into success. Persistence, journal and cleanup failures
+cannot be acknowledged away. Native receipts are not rewritten by Mods recovery.
+
+See the [user path](../README.md#native-steam-client-actions) and
+[parity evidence](parity.md#native-steam-client-ui-and-helper-boundary). No native
+operation activates content, applies game configuration or changes profile copies.

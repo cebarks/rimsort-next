@@ -200,3 +200,45 @@ The design was revised before implementation:
   Installer API. Controlled tests hold that real boundary and streamed Finished
   separately; cancellation cannot interrupt publication. Cost: one bounded
   progress notification per publication, not a filesystem mocking framework.
+- D55: native acquisition uses the same confirmation/worker/post-return receipt
+  owner as SteamCMD, with an explicit request variant. Native preferences live in
+  `steam-client.json`: schema 1, optional absolute helper override, optional
+  absolute runtime directory, and a 900-second default (1–86400 allowed). With no
+  override, discovery is purely the canonical helper beside the main executable.
+  Invalid overrides never fall back. Native use needs no SteamCMD binary or
+  preferences. Startup, backend selection and preference changes never initialize
+  the SDK; even Inspect requires explicit confirmation. No global environment or
+  runtime assets are modified.
+- D56: native schema-1 receipts add optional `native` evidence: action and runtime,
+  per-item request identity, independent Before/After facts, acknowledgement,
+  outcome, structured failure and filesystem-validation errors. Compact batch
+  process/cleanup evidence is retained, not full adapter reports. Diagnostics have
+  one operation-wide 1000-line/256-KiB budget with dropped counts. SDK Installed
+  is not usable-mod proof: existing bounded metadata validation and independent
+  filesystem item-identity checks must pass. Paths remain backend-specific;
+  Steam client content is never promoted through SteamCMD ownership. Mods recovery
+  accepts only SteamCMD receipts: its current-installation journal gate is separate
+  from native facts and cannot rewrite native receipt bytes or mark an unrelated
+  failed native persistence attempt successful.
+- D57: failed/unknown native effects, including acknowledgement with unknown or
+  contradictory subscription observation, protect Launch regardless of content
+  warning preferences. The original uncertain request/item facts survive restart,
+  new preview and unrelated Inspect. PendingEffects also retain original compact
+  NativeRun records (serde-defaulted empty for older receipts), deduplicated by
+  original request identity, not nested reports. Only prior unresolved effects
+  are carried into the next operation; covering Inspect/ack keeps their original
+  items and runs in that reconciliation receipt without an unbounded audit history.
+  Only complete known After observations covering every affected item, or
+  explicitly confirmed acknowledgement, resolve this warning. For an original
+  Download, Inspect must also show a current validated matching installation:
+  Before-only, missing, unknown or NeedsUpdate observations are insufficient.
+  Resolution never rewrites original failure/outcome/acknowledgement evidence.
+  Further mutations and installation replacement are conservatively
+  blocked until then. Acknowledgement does not reverse effects, stop external
+  Steam work, or clear cleanup, journal or persistence errors. Once the receipt
+  is durable, the ordinary dirty-game Close gate may run; the warning survives
+  reopening. Interrupted owned-process cleanup remains a hard gate on restart.
+- D58: releasing an acquisition question reconciles pending rules and repaints
+  the main window outside state locks, using the same post-receipt reconciliation
+  as normal delivery. This covers Cancel and late Keep-open without a further
+  worker wakeup; unrelated Workflow prompt and receipt ownership is unchanged.

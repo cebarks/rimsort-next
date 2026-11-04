@@ -638,7 +638,7 @@ fn copy_tree(
     }
     sync_directory(destination)
 }
-fn validate_about(root: &Path, version: &GameVersion) -> Result<(), AcquisitionError> {
+pub(crate) fn validate_about(root: &Path, version: &GameVersion) -> Result<(), AcquisitionError> {
     let about = root.join("About/About.xml");
     no_links(&about)?;
     let mut bytes = Vec::new();
