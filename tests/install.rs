@@ -138,9 +138,13 @@ fn unrepresentable_paths_hard_links_and_sockets_are_refused() {
                         (true, Some(92)),
                         "the filesystem unexpectedly refused the raw filename: {error}"
                     );
-                    // APFS cannot create this entry; present the same raw name as the source.
+                    // Creation is refused, but looking up that absent source returns ENOENT.
+                    let lookup = fs::read_dir(&invalid)
+                        .expect_err("a rejected filename cannot identify a source directory");
+                    assert_eq!(lookup.kind(), std::io::ErrorKind::NotFound);
+                    assert_eq!(lookup.raw_os_error(), Some(2));
                     checked_source = invalid;
-                    expected_os_error = Some(92);
+                    expected_os_error = lookup.raw_os_error();
                 }
                 None
             }
@@ -163,6 +167,7 @@ fn unrepresentable_paths_hard_links_and_sockets_are_refused() {
         if let Some(expected) = expected_os_error {
             match error {
                 rimsort_rust::application::acquisition::AcquisitionError::Io(source) => {
+                    assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
                     assert_eq!(source.raw_os_error(), Some(expected));
                 }
                 other => panic!("the filesystem error must be preserved: {other}"),

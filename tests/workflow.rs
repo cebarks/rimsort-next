@@ -55,6 +55,13 @@ const WINDOWS_32: &str = "RimWorldWin.exe";
 const LINUX_64: &str = "RimWorldLinux64";
 const LINUX_32: &str = "RimWorldLinux";
 
+fn expected_windows_launch_label() -> String {
+    format!(
+        "launch:@tmp/{}",
+        Path::new("games").join(WINDOWS_64).display()
+    )
+}
+
 fn version(text: &str) -> GameVersion {
     GameVersion::parse(text).unwrap_or_else(|error| panic!("{text:?} must parse: {error}"))
 }
@@ -582,7 +589,7 @@ fn a_clean_list_launches_one_command_and_writes_nothing() {
     let effects = case.launch_request();
     assert_eq!(
         case.labels(&effects),
-        vec!["launch:@tmp/games/RimWorldWin64.exe"],
+        vec![expected_windows_launch_label()],
         "a clean list launches: no prompt, no save, no refresh"
     );
 
@@ -639,7 +646,7 @@ fn launching_with_unsaved_edits_saves_first_and_then_launches() {
     let launched = case.save_landed(&saved);
     assert_eq!(
         case.labels(&launched),
-        vec!["launch:@tmp/games/RimWorldWin64.exe"],
+        vec![expected_windows_launch_label()],
         "the launch follows the committed save"
     );
     assert_eq!(
@@ -775,10 +782,7 @@ fn a_second_launch_while_the_spawn_is_pending_is_refused() {
     let first = case.launch_request();
     let second = case.launch_request();
 
-    assert_eq!(
-        case.labels(&first),
-        vec!["launch:@tmp/games/RimWorldWin64.exe"]
-    );
+    assert_eq!(case.labels(&first), vec![expected_windows_launch_label()]);
     let reported = failures(&second);
     assert_eq!(reported.len(), 1, "one spawn at a time, got {second:?}");
     assert_eq!(reported[0].0, OperationKind::Launch);
@@ -799,7 +803,7 @@ fn a_second_launch_while_the_spawn_is_pending_is_refused() {
     let third = case.launch_request();
     assert_eq!(
         case.labels(&third),
-        vec!["launch:@tmp/games/RimWorldWin64.exe"],
+        vec![expected_windows_launch_label()],
         "and a later launch is allowed"
     );
 }
@@ -1211,7 +1215,7 @@ fn save_and_launch_confirms_warnings_once() {
     let launched = case.save_landed(&saved);
     assert_eq!(
         case.labels(&launched),
-        vec!["launch:@tmp/games/RimWorldWin64.exe"],
+        vec![expected_windows_launch_label()],
         "the launch does not ask the same question again"
     );
 }
@@ -1480,7 +1484,7 @@ fn a_completion_from_a_finished_operation_changes_nothing() {
     let launched = case.save_landed(&saving);
     assert_eq!(
         case.labels(&launched),
-        vec!["launch:@tmp/games/RimWorldWin64.exe"]
+        vec![expected_windows_launch_label()]
     );
 
     let repeated = case.reduce(WorkflowEvent::SaveFinished {
@@ -1946,7 +1950,7 @@ fn confirming_warnings_after_the_last_finding_was_removed_still_asks_the_unsaved
     let launched = case.save_landed(&saving);
     assert_eq!(
         case.labels(&launched),
-        vec!["launch:@tmp/games/RimWorldWin64.exe"]
+        vec![expected_windows_launch_label()]
     );
     assert_eq!(case.bytes(), document(&[CORE_TOKEN]).as_bytes());
 }
@@ -2318,7 +2322,7 @@ fn an_operation_in_flight_keeps_the_preference_it_started_with() {
     let launched = case.save_landed(&saving);
     assert_eq!(
         case.labels(&launched),
-        vec!["launch:@tmp/games/RimWorldWin64.exe"],
+        vec![expected_windows_launch_label()],
         "and is not interrupted by a prompt it never agreed to"
     );
     assert_no_effects(

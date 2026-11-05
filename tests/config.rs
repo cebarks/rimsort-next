@@ -1970,6 +1970,10 @@ fn a_non_utf8_target_preserves_names_or_is_refused_without_mutation() {
             (true, Some(92)),
             "the filesystem unexpectedly refused the raw filename: {error}"
         );
+        let lookup = fs::symlink_metadata(&path)
+            .expect_err("a rejected filename must not identify an existing target");
+        assert_eq!(lookup.kind(), std::io::ErrorKind::NotFound);
+        assert_eq!(lookup.raw_os_error(), Some(2));
         let error = commit_save(&path, &snapshot, &prepared)
             .expect_err("saving an unrepresentable filename must fail");
         match error {
@@ -1978,7 +1982,8 @@ fn a_non_utf8_target_preserves_names_or_is_refused_without_mutation() {
                 source,
             } => {
                 assert_eq!(failed, path);
-                assert_eq!(source.raw_os_error(), Some(92));
+                assert_eq!(source.kind(), lookup.kind());
+                assert_eq!(source.raw_os_error(), lookup.raw_os_error());
             }
             other => panic!("the filesystem error must be preserved: {other}"),
         }

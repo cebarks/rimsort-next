@@ -74,8 +74,11 @@ config it reads at startup before publishing its marker; the parent checks those
 observed bytes, not just eventual config contents. Unix raw-byte backup naming is
 also tested without filesystem creation. On filesystems accepting the filename,
 real config save/backup and installer-refusal coverage remains; on APFS the tests
-instead require precise EILSEQ propagation and no publication or lossy-alias
-mutation. Neither case is skipped or treated as success after an unchecked error.
+instead require the EILSEQ creation refusal and independently check the subsequent
+ENOENT lookup errors are preserved, with no publication or lossy-alias mutation.
+Creation and lookup are distinct operations, not assumed to return the same error.
+Workflow trace expectations construct native paths rather than hard-coding Unix
+separators. No case is skipped or treated as success after an unchecked error.
 
 A new hosted matrix is required for these fixture changes. Successful Windows
 root probes can be retained with the installer unit group's `--nocapture` option.
