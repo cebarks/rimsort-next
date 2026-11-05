@@ -58,12 +58,29 @@ targets, trusted cache-save conditions and test commands are unchanged. Bounded
 resource snapshots before Tests and always afterward report disk space, inodes,
 RAM, cgroup memory events when available and `target/check` size.
 
-These changes are not hosted-green evidence. Windows ordinary/canonical root
-regressions include per-component metadata/raw-OS-error probes; run the installer
-unit group with `--nocapture` on Windows to retain successful probe output as well
-as failure output. Actual Windows/macOS outcomes and Linux post-change headroom
-require the reviewed branch's hosted matrix. Windows acquisition remains disabled;
-fixture success does not establish real SDK/account or native GUI behavior.
+Candidate `6fea82a` ([run 42122079417](https://github.com/cebarks/rimsort-next/actions/runs/42122079417))
+passed Linux Clippy, all 630 tests (one ignored), release build and archive upload.
+Its check target grew from 1015 MiB to 3.4 GiB across Tests; the runner reported
+85 GiB free before and 82 GiB afterward. This is actual headroom on that runner,
+not proof of the earlier linker's exact failure mechanism or identical host capacity.
+Windows ordinary/canonical root regressions passed on Windows; the earlier
+installer-library and budget fixtures passed on both Windows and macOS. The matrix
+still failed: Windows could not execute a lifecycle fixture's POSIX script, and
+APFS rejected an invalid UTF-8 config filename before its save test reached the
+application.
+
+The fixture follow-up uses a harmless host-native executable that records the
+config it reads at startup before publishing its marker; the parent checks those
+observed bytes, not just eventual config contents. Unix raw-byte backup naming is
+also tested without filesystem creation. On filesystems accepting the filename,
+real config save/backup and installer-refusal coverage remains; on APFS the tests
+instead require precise EILSEQ propagation and no publication or lossy-alias
+mutation. Neither case is skipped or treated as success after an unchecked error.
+
+A new hosted matrix is required for these fixture changes. Successful Windows
+root probes can be retained with the installer unit group's `--nocapture` option.
+Windows acquisition remains disabled; fixture/build/archive success does not
+establish real SDK/account or native GUI behavior.
 
 ## Combined daily-driver scenario
 

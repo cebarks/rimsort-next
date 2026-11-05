@@ -23,9 +23,6 @@ use rimsort_rust::ui::window::{MainWindow, Workspace};
 use slint::{ComponentHandle as _, Model as _};
 use tempfile::TempDir;
 
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt as _;
-
 const WATCHDOG: Duration = Duration::from_secs(20);
 const OBSERVE: Duration = Duration::from_millis(25);
 
@@ -83,18 +80,34 @@ impl Fixture {
             .expect("the metadata must be writable");
         }
         let marker = game_root.join("launched");
-        let launcher = game_root.join("harmless-launch.sh");
+        let launcher = game_root.join(format!("harmless-launch{}", std::env::consts::EXE_SUFFIX));
+        let source = game_root.join("harmless_launch.rs");
         fs::write(
-            &launcher,
-            format!(
-                "#!/bin/sh\nprintf 'started %s' \"$#\" > '{}'\n",
-                marker.display()
-            ),
+            &source,
+            r#"fn main() {
+    let executable = std::env::current_exe().unwrap();
+    let game = executable.parent().unwrap();
+    let config = game.parent().unwrap().join("config/ModsConfig.xml");
+    let observed = std::fs::read(config).unwrap();
+    std::fs::write(game.join("config-at-launch.xml"), observed).unwrap();
+    let recorded = format!("started {}", std::env::args_os().skip(1).count());
+    std::fs::write(game.join("launched.part"), recorded).unwrap();
+    std::fs::rename(game.join("launched.part"), game.join("launched")).unwrap();
+}
+"#,
         )
-        .expect("the launch fixture must be writable");
-        #[cfg(unix)]
-        fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755))
-            .expect("the launch fixture must be executable");
+        .expect("the launch fixture source must be writable");
+        let compiled = std::process::Command::new("rustc")
+            .arg(&source)
+            .arg("-o")
+            .arg(&launcher)
+            .output()
+            .expect("the launch fixture compiler must start");
+        assert!(
+            compiled.status.success(),
+            "the native launch fixture must compile: {}",
+            String::from_utf8_lossy(&compiled.stderr)
+        );
         let settings = Settings {
             schema_version: 1,
             game_root: Some(game_root),
@@ -513,10 +526,18 @@ fn scenario_launch_saves_first_and_only_offers_save_or_cancel(
         })
     })
     .expect("the accepted order is: write first, then start the game");
+    let observed = fs::read(fixture.marker.with_file_name("config-at-launch.xml"))
+        .expect("the child must record the config it read at startup");
+    let observed = rimsort_rust::integrations::config::parse_config(&observed)
+        .expect("the config observed by the child must parse");
+    assert_eq!(
+        observed.active_tokens, expected,
+        "the child's own startup read must see the saved list"
+    );
     assert_eq!(
         fixture.written_tokens(),
         expected,
-        "the write happened, with the list the session held, before the spawn"
+        "the saved list still matches the session after the spawn"
     );
     assert!(
         !ui.prompt_open(),

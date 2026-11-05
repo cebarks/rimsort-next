@@ -1936,7 +1936,7 @@ fn a_symlink_at_the_backup_name_is_replaced_not_written_through() {
 
 #[cfg(unix)]
 #[test]
-fn a_non_utf8_target_name_gets_a_backup_named_from_the_same_bytes() {
+fn a_non_utf8_target_preserves_names_or_is_refused_without_mutation() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
 
@@ -1944,13 +1944,52 @@ fn a_non_utf8_target_name_gets_a_backup_named_from_the_same_bytes() {
     let directory = TempDir::new().expect("a temporary directory");
     let name = OsString::from_vec(b"ModsConfig \xe4\x2d name.xml".to_vec());
     let path = directory.path().join(&name);
-    fs::write(&path, document).expect("the target file must be written");
-
+    let alias = directory.path().join(name.to_string_lossy().as_ref());
+    let alias_backup = directory
+        .path()
+        .join(format!("{}.rimsort-rust.bak", name.to_string_lossy()));
+    fs::write(&alias, b"unrelated alias").expect("the alias must be written");
+    fs::write(&alias_backup, b"previous alias backup").expect("the alias backup must be written");
+    let names = || {
+        let mut names: Vec<OsString> = fs::read_dir(directory.path())
+            .expect("the directory must be readable")
+            .map(|entry| entry.expect("a directory entry").file_name())
+            .collect();
+        names.sort();
+        names
+    };
+    let before = names();
     let snapshot = parse_config(document).expect("the document must load");
     let catalog = catalog_for(&["b.mod"]);
     let prepared = prepare_save(&snapshot, &entries_with(&catalog, &["b.mod"]), &catalog)
         .expect("the save must prepare");
+    if let Err(error) = fs::write(&path, document) {
+        // APFS refuses invalid UTF-8 filenames with EILSEQ before a file exists.
+        assert_eq!(
+            (cfg!(target_os = "macos"), error.raw_os_error()),
+            (true, Some(92)),
+            "the filesystem unexpectedly refused the raw filename: {error}"
+        );
+        let error = commit_save(&path, &snapshot, &prepared)
+            .expect_err("saving an unrepresentable filename must fail");
+        match error {
+            Error::Io {
+                path: failed,
+                source,
+            } => {
+                assert_eq!(failed, path);
+                assert_eq!(source.raw_os_error(), Some(92));
+            }
+            other => panic!("the filesystem error must be preserved: {other}"),
+        }
+        assert_eq!(names(), before, "no staging or backup name may appear");
+        assert_eq!(fs::read(&alias).unwrap(), b"unrelated alias");
+        assert_eq!(fs::read(&alias_backup).unwrap(), b"previous alias backup");
+        return;
+    }
     commit_save(&path, &snapshot, &prepared).expect("the save must commit");
+    assert_eq!(fs::read(&alias).unwrap(), b"unrelated alias");
+    assert_eq!(fs::read(&alias_backup).unwrap(), b"previous alias backup");
 
     let backup_name = OsString::from_vec(
         [
@@ -1970,6 +2009,10 @@ fn a_non_utf8_target_name_gets_a_backup_named_from_the_same_bytes() {
         document,
         "and it holds the loaded bytes"
     );
+    let mut expected_names = before;
+    expected_names.extend([name, backup_name]);
+    expected_names.sort();
+    assert_eq!(names(), expected_names, "no staging names may remain");
 }
 
 #[test]

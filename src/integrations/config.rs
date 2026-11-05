@@ -1432,6 +1432,23 @@ mod tests {
     )
     .as_bytes();
 
+    #[cfg(unix)]
+    #[test]
+    fn backup_path_preserves_non_utf8_bytes_without_filesystem_creation() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+        let path = PathBuf::from(OsString::from_vec(
+            b"/fixture/ModsConfig \xe4\x2d name.xml".to_vec(),
+        ));
+        let backup = backup_path(&path);
+        assert_eq!(
+            backup.as_os_str().as_bytes(),
+            b"/fixture/ModsConfig \xe4\x2d name.xml.rimsort-rust.bak",
+            "backup naming must preserve bytes even when the filesystem rejects the name"
+        );
+    }
+
     /// A previous save's backup, distinguishable from every byte this case uses.
     const PREVIOUS_BACKUP: &[u8] = b"the backup a previous save left behind";
 

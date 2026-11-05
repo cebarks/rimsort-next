@@ -127,9 +127,21 @@ fn unrepresentable_paths_hard_links_and_sockets_are_refused() {
         fs::create_dir(&mods).unwrap();
         let src = temp.path().join("source");
         source(&src, "old");
+        let mut checked_source = src.clone();
+        let mut expected_os_error = None;
         let _socket = match kind {
             "name" => {
-                fs::write(src.join(OsString::from_vec(vec![0xff])), "x").unwrap();
+                let invalid = src.join(OsString::from_vec(vec![0xff]));
+                if let Err(error) = fs::write(&invalid, "x") {
+                    assert_eq!(
+                        (cfg!(target_os = "macos"), error.raw_os_error()),
+                        (true, Some(92)),
+                        "the filesystem unexpectedly refused the raw filename: {error}"
+                    );
+                    // APFS cannot create this entry; present the same raw name as the source.
+                    checked_source = invalid;
+                    expected_os_error = Some(92);
+                }
                 None
             }
             "hardlink" => {
@@ -139,17 +151,23 @@ fn unrepresentable_paths_hard_links_and_sockets_are_refused() {
             _ => Some(UnixListener::bind(src.join("socket")).unwrap()),
         };
         let mut installer = Installer::open(&mods).unwrap();
-        assert!(
-            installer
-                .promote(
-                    PublishedFileId::try_from(42).unwrap(),
-                    &src,
-                    &GameVersion::parse("1.6").unwrap(),
-                    None,
-                    &AtomicBool::new(false)
-                )
-                .is_err()
-        );
+        let error = installer
+            .promote(
+                PublishedFileId::try_from(42).unwrap(),
+                &checked_source,
+                &GameVersion::parse("1.6").unwrap(),
+                None,
+                &AtomicBool::new(false),
+            )
+            .expect_err("unsafe or unrepresentable source paths must be refused");
+        if let Some(expected) = expected_os_error {
+            match error {
+                rimsort_rust::application::acquisition::AcquisitionError::Io(source) => {
+                    assert_eq!(source.raw_os_error(), Some(expected));
+                }
+                other => panic!("the filesystem error must be preserved: {other}"),
+            }
+        }
         assert!(!mods.join("42").exists());
         assert_eq!(fs::read_to_string(src.join("data")).unwrap(), "old");
     }

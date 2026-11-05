@@ -21,6 +21,9 @@
   incomplete drive prefix; link and parent-traversal refusals remain enforced.
 - Installer/About-validation test fixtures use canonical trusted system-temp
   roots, and receipt-budget fixtures capture host-absolute paths.
+- Lifecycle launch fixtures use host-native executables and record the config
+  observed at startup. Unix filename fixtures preserve raw-byte coverage while
+  explicitly checking APFS rejection without lossy-alias mutation.
 - Acquisition operations explicitly confirm at most 20 candidates per page while
   retaining 10,000-item public preview. Exact captured inputs plus bounded future
   receipts/origins/resolutions must fit 4 MiB before dispatch; oversized operations
