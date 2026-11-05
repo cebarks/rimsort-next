@@ -1,10 +1,11 @@
 # Selected capability and proof ledger
 
 Scope is [basic core](design/basic-core.md), not complete Python parity. Task1–5
-scoped reviews accepted controlled Linux/headless functionality; the independent
-whole-branch review, also serving as Task6 acceptance, remains
-[PENDING](reviews/final-review.md). See [verification](verification.md) for current
-commands and proof categories, and [parity](parity.md) for inherited metadata detail.
+scoped reviews and the independent whole-branch review plus consolidated-fix
+rereview accepted the controlled Linux scope for
+[private integration](reviews/final-review.md), with the limitations below.
+See [verification](verification.md) for current commands and proof categories,
+and [parity](parity.md) for inherited metadata detail.
 
 | Capability | Implementation and automated evidence | Boundary |
 | --- | --- | --- |
@@ -15,7 +16,8 @@ commands and proof categories, and [parity](parity.md) for inherited metadata de
 | Profiles/history/list exchange | `profiles`, `lists`, `window_profiles`, daily-driver fixture | Checkpoints are token lists, not installations; startup reads actual game config |
 | Community rules | `community`, `community_sorting`, private loopback callback tests | Explicit update only; no custom endpoint/editor; last valid cache retained on failure |
 | Workshop public preview | `workshop`, held HTTP200/503 Cancel callbacks, 10k×128-byte-title fixture | Up to10k public candidates; fresh cancellation prevents later requests/retries/expansions and cancelled completion; not installation/account proof |
-| Confirmed batches and bounded receipts | `receipt_budget`, `window_receipt_budget`, `window_capacity`, exact20-item retry fixture | Explicit <=20 per GUI operation; exact input plus future/origin/resolution budget before dispatch under4MiB; no automatic next page or clipped SDK facts |\n| SteamCMD acquisition/publication/recovery | `steamcmd`, `install`, `window_acquisition`, `acquisition_worker`, daily-driver fixture | Controlled executables/temporary layouts; historical cleanup uncertainty survives restart independently of journal recovery; publication-observer panic not runtime-injected |
+| Confirmed batches and bounded receipts | `receipt_budget`, `window_receipt_budget`, `window_capacity`, exact20-item retry fixture | Explicit <=20 per GUI operation; exact input plus future/origin/resolution budget before dispatch under4MiB; no automatic next page or clipped SDK facts |
+| SteamCMD acquisition/publication/recovery | `steamcmd`, `install`, `window_acquisition`, `acquisition_worker`, daily-driver fixture | Controlled executables/temporary layouts; historical cleanup uncertainty survives restart independently of journal recovery; publication-observer panic not runtime-injected |
 | Native Inspect/Subscribe/Unsubscribe/Download | `native_acquisition`, `native_failures`, private native callback fixtures | Real strict adapter, fake helper only; raw Before/After/SDK/runtime facts preserved |
 | Close with late accepted effects | Worker/lifecycle fixtures and combined daily-driver | Cleanup and atomic receipt precede hide; test-owned harmless game survives; external Steam effects not undone |
 | Main/helper separation | Locked main build/compiler IDs, normal dependency tree, ELF and default member checks | Pure protocol in main; helper separately needs SDK runtime; no runtime asset distribution |
@@ -34,6 +36,9 @@ commands and proof categories, and [parity](parity.md) for inherited metadata de
 - Conflict analysis has no placeholder control. Git/ZIP acquisition, native
   Workshop search, embedded webview, multiple installations, user-rule editor,
   metadata database management and automatic mod activation are out of scope.
+- Long Rules status/source text can remain clipped in its scroll area. The
+  warning and Rules checkbox captions, section headings, and default/minimum
+  window access were verified; this is not all-theme/DPI certification.
 - A successful local release compilation is not packaging/legal approval,
   publishing or a release. Valve SDK redistribution requires separate review;
   see [helper contract](steam-helper.md) and [build notes](build-artifacts.md).

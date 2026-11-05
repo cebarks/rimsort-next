@@ -1,12 +1,12 @@
 # Basic-core integrated verification
 
-Task6 execution evidence is **pre-independent-final-review**, not self-acceptance.
-The [final review](reviews/final-review.md) remains pending. Linux x86_64 controlled
-fixtures, headless callbacks, graphical startup and live-account behavior are
-separate proof categories. The Task6 change tree based on accepted `cef01143`
-passed the historical commands below before its handoff commit. The subsequent
-consolidated final-fix wave has separate fresh evidence below; historical gates
-are not claims about the changed source.
+The independent [final review and scoped rereview](reviews/final-review.md)
+accepted the selected branch for private integration within its tested Linux
+scope. Controlled fixtures, headless callbacks, graphical startup and live-account
+behavior remain separate proof categories. The Task6 change tree based on
+`cef01143` passed the historical commands below before its handoff commit. The
+subsequent consolidated final-fix wave has separate current evidence below;
+historical gates are not claims about changed source or untested environments.
 
 ## Reproduce automated checks
 
@@ -170,10 +170,81 @@ tracked secret/SDK/session/build-output paths before local commits. No push/PR.
   No changed dependency pins or tracked SDK/session/output/credential-pattern
   matches were found in the bounded audit. No publishing/push/PR occurred.
 
-## Consolidated final-fix verification\n\nThe final-fix wave reproduces historical SteamCMD cleanup loss, clean qualified-token\nLaunch mismatch, ineffective Cancel, oversized GUI confirmation and the invalid\nDownload witness. Its actual callback fixtures include held HTTP200 and503, the\nidentified live escaped test descendant through reopen, an acquired Workshop copy\nfollowed by explicit Refresh, 10,000 candidates with128-byte titles and explicit\n20-item first/next operations, all20 native results, original pending items/runs,\nnormal Close/reopen and exact-byte failed-write retry with no new request.\n\nIndependent serialized maxima exercise actual JSON escaping, raw protocol limits,\ncurrent+pending duplication, inherited originals and Inspect/ack growth. At the\n4MiB admission boundary the generated result writes and reads atomically; one\nadditional known byte is refused. Both backends refuse near-cap public metadata\nbefore confirmation/dispatch; carried legacy300-identity pending evidence likewise\nrefuses a new Inspect with carried originals without changing old bytes or sending
-a helper request. The real20-item mutation/Inspect scenario separately proves full
-covering reconciliation.\nProse-only shortening visibly counts omitted bytes and preserves UTF-8. Original\nSDK observations, outcomes, details and unknown identities are not shortened.\n\nFinal workspace/release/isolation/native/audit results are pending consumption.\nGraphical evidence will be separate from headless proofs, with default/minimum\nwindow screenshots on the final release binary. No live SDK/account, other-platform\nruntime, publication-panic injection or universal performance proof is claimed.\n\nHistorical failures are retained in the private execution report: M2 RED,
-fixture content outside discovery roots, a test-only slice argument mismatch,
-and rustfmt after late test additions. All current source/test gates above
-passed after correction. Publication-panic runtime injection, real SDK/account,
-other-platform runtime and independent whole-branch acceptance remain unverified.
+## Consolidated final-fix verification
+
+The original whole-branch review covered all 107 changed files and found five
+Important and two Minor issues. One consolidated fix wave, committed as
+`28cac78ead2e3f2bbacb417b6fafbe4172b07f9b`, addressed all seven. The single
+scoped rereview accepted each correction with no Critical or Important residual.
+Its only new residual was malformed/stale documentation, corrected during
+coordinator signoff without changing implementation behavior.
+
+Earlier Task6 screenshots and results above are historical pre-fix evidence.
+The current fix includes historical SteamCMD cleanup protection, clean Launch
+token/copy identity, pre-dispatch receipt admission, explicit acquisition pages,
+cooperative public-preview cancellation, readable native controls and a valid
+Download failure witness.
+
+Actual callback fixtures cover held HTTP 200/503 cancellation, a live escaped
+test descendant through reopen, acquired Workshop copy plus explicit Refresh,
+10,000 candidates with 128-byte titles and explicit 20-item first/next operations,
+all 20 native results, original pending items/runs, normal Close/reopen and
+exact-byte failed-write retry without another backend request. Serialized maxima
+cover JSON escaping, protocol bounds, current/pending duplication, inherited
+origins and Inspect/ack growth under the unchanged 4 MiB limit. Admission refuses
+oversized known evidence before effects. The legacy 300-identity fixture tests a
+new Inspect carrying that evidence; it does not claim a single operation covers
+all 300 identities. Prose shortening visibly accounts for omitted bytes; accepted
+SDK observations, outcomes, failure details and unresolved identities remain intact.
+
+### Current consumed gates
+
+- Parent-owned `just check`: **627 passed, 0 failed, 1 existing ignored**, across
+  47 result groups; format, strict workspace/all-target Clippy and workspace
+  debug build passed. Log: `coordinator-final-check.log`.
+- Locked **workspace release** build passed. Log:
+  `coordinator-final-release.log`. Main-only compiler/default-member/tree/ELF
+  checks passed in `final-fix-isolation5.log`; these are cached-build evidence,
+  not clean-room compilation or other-platform runtime proof.
+- Read-only source/privacy/provenance/link audit passed, with unchanged dependency,
+  lock and license files. Original main had advanced to `2e394a12` before this
+  wave; the newer original state was preserved. No prior original dirty-byte
+  hashes exist, so only the recorded status/ref comparisons are claimed.
+  Log: `coordinator-final-audit.log`.
+- All 26 modified/new file hashes matched before, after and immediately before
+  staging. No implementation changes followed these checks.
+
+Logs are retained in the private ignored execution workspace rather than tracked
+as product source. Passing counts are not a substitute for the independent review.
+
+### Current native release evidence
+
+The final release graphical supervisor task `b91a9a86d` completed with exit 0.
+Release main SHA-256 matches `supervisor.json`:
+`8ba009d6b8548fefbca762a27dcf86619aed7e01c5fb6656c71394c835d398b1`.
+
+Artifacts are under ignored `.superpowers/native-final-fix/final/`:
+default 1120×700, minimum 940×480, scrolled controls, caption click/keyboard
+saved states, Rules, acquisition paging, native preferences and long-path-end
+captures. Coordinator and independent rereviewer inspected the actual images.
+Headings and warning/Rules captions are readable; scrolling exposes full
+configuration actions at the minimum size, and long input suffixes remain
+reachable. No global theme redesign was introduced. Long Rules status/source
+text can still clip; this is a disclosed minor limitation, not a safety claim.
+
+The manager exited 0. The harmless launch fixture remained **S (sleeping)**,
+not zombie, after manager Close and then exited through its natural release file.
+Fake-helper request markers remained absent; game bytes were unchanged. Explicit
+data/HOME/XDG/bus/display/browser isolation was used. Process records, not the
+launch screenshot alone, establish survival. No real SDK/account/game operation
+or SDK asset redistribution was tested or performed.
+
+### Acceptance and remaining limits
+
+See [final review](reviews/final-review.md) for accepted private-integration scope.
+Windows acquisition remains intentionally disabled before spawn; macOS and
+offline Windows runtime, live Steam/SDK/account behavior, SDK redistribution,
+publication-observer panic injection, universal durability and large-library
+performance remain unverified. The earlier 300-mod debug/headless measurement
+is not native FPS or a scalability guarantee. No merge, push, PR, hosted release
+workflow or publication follows from these verification results.
