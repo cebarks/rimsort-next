@@ -338,28 +338,23 @@ fn prompt_open(ws: &Workspace) -> bool {
     handle.with_window(|window| window.get_prompt_open())
 }
 
-/// Erases the field under the click and types `value`, then commits it with Return. `Home` puts the
-/// caret at the start and `Delete` removes forward, so the field ends holding exactly `value`.
-/// Erases the field under the click and types `value`, then commits it with Return. `Home` puts the
-/// caret at the start and `Delete` removes forward, so the field ends holding exactly `value`.
-fn retype(ws: &Workspace, y: f32, value: &str) {
+/// Clears the named field through Home/Delete, types `value`, and commits it with Return.
+fn retype(ws: &Workspace, name: &str, y: f32, value: &str) {
     for &x in X_FIELD {
+        let total = field_value(&ws.draft(), name).chars().count();
         click(ws, x, y);
         press_key(ws, Key::Home);
-        for _ in 0..64 {
+        for _ in 0..total {
             press_key(ws, Key::Delete);
         }
         type_text(ws, value);
         press_key(ws, Key::Return);
-        if FIELDS
-            .iter()
-            .any(|name| field_value(&ws.draft(), name) == value)
-        {
+        if field_value(&ws.draft(), name) == value {
             return;
         }
     }
     panic!(
-        "no click at y {y} let typed text become the field's whole value; status {:?}",
+        "no click at y {y} let typed text become {name}'s whole value; status {:?}",
         ws.status()
     );
 }
@@ -481,7 +476,7 @@ fn typing_into_the_form_reaches_the_settings_service() {
     // 3. The save chord writes the installed game list even while the typed draft points
     //    somewhere else, and never redirects to the settings file.
     let typed = fixture.typed();
-    retype(&ws, fields[2].1, &typed[2].1);
+    retype(&ws, "config-path", fields[2].1, &typed[2].1);
     let game_a_before = fs::read(&fixture.config_a).expect("config a");
     let game_b_before = fs::read(&fixture.config_b).expect("config b");
     ctrl(&ws, "s");
@@ -513,9 +508,10 @@ fn typing_into_the_form_reaches_the_settings_service() {
 
     // 4. An unfinished edit survives a progress paint: half a path, a real repaint, then the rest.
     let (head, tail) = typed[2].1.split_at(typed[2].1.len() / 2);
+    let total = field_value(&ws.draft(), "config-path").chars().count();
     click(&ws, X_FIELD[1], fields[2].1);
     press_key(&ws, Key::Home);
-    for _ in 0..64 {
+    for _ in 0..total {
         press_key(&ws, Key::Delete);
     }
     type_text(&ws, head);
@@ -542,7 +538,7 @@ fn typing_into_the_form_reaches_the_settings_service() {
             .find(|(found, _)| *found == *name)
             .map(|(_, y)| *y)
             .expect("the field was found above");
-        retype(&ws, y, value);
+        retype(&ws, name, y, value);
     }
     for name in ["workshop-root", "executable-override"] {
         let y = fields
@@ -550,7 +546,7 @@ fn typing_into_the_form_reaches_the_settings_service() {
             .find(|(found, _)| *found == name)
             .map(|(_, y)| *y)
             .expect("the field was found above");
-        retype(&ws, y, "");
+        retype(&ws, name, y, "");
     }
     assert_eq!(
         fixture.settings_bytes(),
@@ -652,7 +648,7 @@ fn typing_into_the_form_reaches_the_settings_service() {
     let good = fixture.settings_bytes();
 
     // 7. An invalid version is refused with the file and the loaded list untouched.
-    retype(&ws, fields[6].1, "9.9 not a version");
+    retype(&ws, "target-version", fields[6].1, "9.9 not a version");
     click(&ws, save.0, save.1);
     assert_eq!(
         fixture.settings_bytes(),

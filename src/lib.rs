@@ -18,3 +18,7 @@ pub mod domain;
 pub mod integrations;
 pub mod startup;
 pub mod ui;
+
+#[cfg(test)]
+#[path = "../tests/support/trusted_temp.rs"]
+mod trusted_temp;

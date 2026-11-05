@@ -33,6 +33,38 @@ RPATH/RUNPATH. Metadata must identify only the root package as default member.
 There is one intentionally ignored `write_smoke_fixture_settings` test; it writes
 fixtures and does not open a native window. No skipped fixture is native proof.
 
+## Hosted CI portability follow-up
+
+The first hosted run on `4a9dd1a33b9dc22e504c1dbbef871a50d3a77cfc`
+([run 42099229707](https://github.com/cebarks/rimsort-next/actions/runs/42099229707))
+failed all three native Test steps after formatting and native Clippy passed.
+Linux reported only 81 MB free immediately before linker SIGBUS; this establishes
+near-full disk, not OOM or an independent LLVM defect. Local Linux uses a different
+linker configuration and is not a reproduction of that hosted failure.
+
+The focused follow-up keeps production filesystem refusals intact: traversal
+accumulates Windows prefixes until RootDir before querying metadata. Tests use
+canonical **trusted system-temp** roots, never canonicalize an arbitrary caller
+path to conceal symlinks, and retain deliberate links, hardlinks, journal escapes
+and atomic-write failures. Receipt-budget fixtures use captured host-absolute
+paths and an independent maximum-serialization oracle with the same 4 MiB and
+one-byte-over admission boundary.
+
+Linux CI alone sets `CARGO_PROFILE_DEV_DEBUG=0` and `CARGO_PROFILE_TEST_DEBUG=0`
+consistently for Clippy and Tests, with a versioned Linux check-cache namespace.
+This sacrifices Linux CI source-level debug information for smaller check artifacts;
+optimizations, assertions, overflow checks, release settings, dependencies, native
+targets, trusted cache-save conditions and test commands are unchanged. Bounded
+resource snapshots before Tests and always afterward report disk space, inodes,
+RAM, cgroup memory events when available and `target/check` size.
+
+These changes are not hosted-green evidence. Windows ordinary/canonical root
+regressions include per-component metadata/raw-OS-error probes; run the installer
+unit group with `--nocapture` on Windows to retain successful probe output as well
+as failure output. Actual Windows/macOS outcomes and Linux post-change headroom
+require the reviewed branch's hosted matrix. Windows acquisition remains disabled;
+fixture success does not establish real SDK/account or native GUI behavior.
+
 ## Combined daily-driver scenario
 
 `tests/support/daily_driver.rs` is imported by the existing single-initialized

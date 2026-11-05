@@ -17,6 +17,10 @@
 
 ### Fixed
 
+- Installer path traversal checks complete Windows roots instead of querying an
+  incomplete drive prefix; link and parent-traversal refusals remain enforced.
+- Installer/About-validation test fixtures use canonical trusted system-temp
+  roots, and receipt-budget fixtures capture host-absolute paths.
 - Acquisition operations explicitly confirm at most 20 candidates per page while
   retaining 10,000-item public preview. Exact captured inputs plus bounded future
   receipts/origins/resolutions must fit 4 MiB before dispatch; oversized operations
@@ -35,6 +39,10 @@
 
 ### Verification and limitations
 
+- Linux CI Clippy/tests omit dev/test debug information, use a separate check-cache
+  namespace and report bounded disk/inode/memory/check-target size snapshots.
+  Release settings are unchanged; this trades CI source-level debug information
+  for disk headroom. Hosted platform outcomes require a new matrix run.
 - Combined fixture workflow and late-acquisition close coverage are documented in
   [verification](docs/verification.md); [capabilities](docs/capabilities.md)
   separates automated, graphical and externally unverified evidence.

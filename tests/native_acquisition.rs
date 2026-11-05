@@ -1,5 +1,7 @@
 //! Real strict adapter and controlled executables only; no real helper is invoked.
 #![cfg(unix)]
+#[path = "support/trusted_temp.rs"]
+mod trusted_temp;
 use rimsort_rust::{
     application::native_acquisition::{self, NativeReport},
     domain::types::GameVersion,
@@ -164,7 +166,7 @@ fn batching_keeps_an_operation_wide_diagnostic_budget() {
 }
 #[test]
 fn inspect_must_cover_download_freshness_not_just_subscription() {
-    let root = tempfile::tempdir().unwrap();
+    let root = trusted_temp::tempdir();
     let failed = r#"
 for phase in ['before','after']:
  emit(dict(kind='observation',item_id=42,phase=phase,facts=dict(subscription='subscribed',install=None)))
@@ -264,7 +266,7 @@ emit(dict(kind='terminal'))
 #[test]
 fn invalid_before_does_not_downgrade_current_after_or_pending_refresh() {
     use rimsort_rust::application::acquisition::DownloadOutcome;
-    let root = tempfile::tempdir().unwrap();
+    let root = trusted_temp::tempdir();
     fs::create_dir_all(root.path().join("old-invalid/About")).unwrap();
     fs::write(root.path().join("old-invalid/About/About.xml"), "<invalid>").unwrap();
     let about = root.path().join("new-copy/About");
@@ -375,7 +377,7 @@ fn sdk_installed_does_not_make_invalid_or_mismatched_content_usable() {
         Some("<invalid>"),
         Some("<ModMetaData><packageId>fixture.valid</packageId></ModMetaData>"),
     ] {
-        let root = tempfile::tempdir().unwrap();
+        let root = trusted_temp::tempdir();
         let about = root.path().join("copy/About");
         fs::create_dir_all(&about).unwrap();
         if let Some(xml) = metadata {

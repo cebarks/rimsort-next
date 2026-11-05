@@ -1,8 +1,11 @@
 use super::*;
+#[path = "install_paths.rs"]
+mod paths;
+use crate::trusted_temp;
 
 #[test]
 fn oversized_state_write_preserves_previous_readable_file() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let path = temp.path().join("state.json");
     atomic_json(&path, &"old").unwrap();
     assert!(atomic_json(&path, &"x".repeat(MAX_STATE as usize)).is_err());
@@ -64,7 +67,7 @@ fn update_capacity_refusal_includes_new_backup_path_before_moving_old() {
 }
 
 fn capacity_refusal(update: bool) {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let mods = temp.path().join("Mods");
     fs::create_dir(&mods).unwrap();
     let source = temp.path().join("source");
@@ -116,7 +119,7 @@ fn capacity_refusal(update: bool) {
 
 #[test]
 fn dropping_installer_unlocks_even_when_a_descriptor_was_duplicated() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let mods = temp.path().join("Mods");
     fs::create_dir(&mods).unwrap();
     let installer = Installer::open(&mods).unwrap();
@@ -133,7 +136,7 @@ fn dropping_installer_unlocks_even_when_a_descriptor_was_duplicated() {
 #[test]
 fn publication_refuses_backup_collisions_and_missing_stage_without_losing_old_content() {
     for failure in ["backup", "stage", "journal"] {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = trusted_temp::tempdir();
         let mods = temp.path().join("Mods");
         fs::create_dir(&mods).unwrap();
         let src = temp.path().join("source");
@@ -166,7 +169,7 @@ fn publication_refuses_backup_collisions_and_missing_stage_without_losing_old_co
 #[test]
 fn modified_old_backup_is_retained_with_warning_and_verified_backup_is_pruned() {
     for modified in [false, true] {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = trusted_temp::tempdir();
         let mods = temp.path().join("Mods");
         fs::create_dir(&mods).unwrap();
         let src = temp.path().join("source");
@@ -195,7 +198,7 @@ fn modified_old_backup_is_retained_with_warning_and_verified_backup_is_pruned() 
 
 #[test]
 fn recovered_commit_prunes_only_verified_older_backup() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let mods = temp.path().join("Mods");
     fs::create_dir(&mods).unwrap();
     let src = temp.path().join("source");
@@ -244,7 +247,7 @@ fn recovery_report(first: bool, after_cleanup: bool, tamper: bool) {
     };
     use crate::integrations::steamcmd::{SteamCmdConfig, promotion_failed};
 
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let mods = temp.path().join("Mods");
     fs::create_dir(&mods).unwrap();
     let source = temp.path().join("source");
@@ -352,7 +355,7 @@ fn recovery_report(first: bool, after_cleanup: bool, tamper: bool) {
 #[test]
 fn recovery_rejects_missing_required_backup_and_journal_path_escape() {
     for escape in [false, true] {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = trusted_temp::tempdir();
         let mods = temp.path().join("Mods");
         fs::create_dir(&mods).unwrap();
         let src = temp.path().join("source");
@@ -402,7 +405,7 @@ fn recovery_uses_layout_not_intent_including_equal_hashes_and_repeated_restart()
                     if first && boundary == 1 {
                         continue;
                     }
-                    let temp = tempfile::tempdir().unwrap();
+                    let temp = trusted_temp::tempdir();
                     let mods = temp.path().join("Mods");
                     fs::create_dir(&mods).unwrap();
                     let src = temp.path().join("source");
@@ -465,7 +468,7 @@ fn recovery_uses_layout_not_intent_including_equal_hashes_and_repeated_restart()
 #[test]
 fn tampered_recovery_preserves_every_copy_and_journal() {
     for tamper in ["target", "stage", "manifest", "backup", "journal"] {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = trusted_temp::tempdir();
         let mods = temp.path().join("Mods");
         fs::create_dir(&mods).unwrap();
         let src = temp.path().join("source");
@@ -498,7 +501,7 @@ fn tampered_recovery_preserves_every_copy_and_journal() {
 #[test]
 fn recovery_after_stage_cleanup_and_manifest_write_failure_is_replayable() {
     for first in [false, true] {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = trusted_temp::tempdir();
         let mods = temp.path().join("Mods");
         fs::create_dir(&mods).unwrap();
         let src = temp.path().join("source");

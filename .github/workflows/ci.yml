@@ -41,10 +41,18 @@ jobs:
         include:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
+            check-env:
+              CARGO_TARGET_DIR: target/check
+              CARGO_PROFILE_DEV_DEBUG: '0'
+              CARGO_PROFILE_TEST_DEBUG: '0'
           - os: windows-2022
             target: x86_64-pc-windows-msvc
+            check-env:
+              CARGO_TARGET_DIR: target/check
           - os: macos-15
             target: aarch64-apple-darwin
+            check-env:
+              CARGO_TARGET_DIR: target/check
     env:
       TARGET: ${{ matrix.target }}
       BUILD_SHA: ${{ github.sha }}
@@ -67,16 +75,42 @@ jobs:
         with:
           workspaces: . -> target/check
           cache-bin: false
-          shared-key: ${{ matrix.os }}-${{ matrix.target }}-check
+          shared-key: ${{ matrix.os }}-${{ matrix.target }}-check${{ runner.os == 'Linux' && '-debug0-v1' || '' }}
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Clippy
-        env:
-          CARGO_TARGET_DIR: target/check
+        env: ${{ matrix.check-env }}
         run: cargo clippy --locked --workspace --all-targets --target ${{ matrix.target }} -- -D warnings
+      - name: Linux resources before Tests
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          timeout 10s df -h . "$RUNNER_TEMP" || printf 'Disk-space snapshot unavailable\n'
+          timeout 10s df -i . "$RUNNER_TEMP" || printf 'Inode snapshot unavailable\n'
+          timeout 10s free -h || printf 'Memory snapshot unavailable\n'
+          if [[ -r /sys/fs/cgroup/memory.events ]]; then
+            printf 'cgroup memory.events:\n'
+            head -c 4096 /sys/fs/cgroup/memory.events
+          else
+            printf 'cgroup memory.events unavailable\n'
+          fi
+          timeout 15s du -sh target/check || printf 'target/check size unavailable or timed out\n'
       - name: Tests
-        env:
-          CARGO_TARGET_DIR: target/check
+        env: ${{ matrix.check-env }}
         run: cargo test --locked --workspace --target ${{ matrix.target }}
+      - name: Linux resources after Tests
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          timeout 10s df -h . "$RUNNER_TEMP" || printf 'Disk-space snapshot unavailable\n'
+          timeout 10s df -i . "$RUNNER_TEMP" || printf 'Inode snapshot unavailable\n'
+          timeout 10s free -h || printf 'Memory snapshot unavailable\n'
+          if [[ -r /sys/fs/cgroup/memory.events ]]; then
+            printf 'cgroup memory.events:\n'
+            head -c 4096 /sys/fs/cgroup/memory.events
+          else
+            printf 'cgroup memory.events unavailable\n'
+          fi
+          timeout 15s du -sh target/check || printf 'target/check size unavailable or timed out\n'
       - name: Cache release dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:

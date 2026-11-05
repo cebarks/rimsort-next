@@ -1,4 +1,5 @@
 use super::*;
+use crate::trusted_temp;
 use slint::Model;
 use std::{fs, sync::mpsc, time::Duration};
 
@@ -33,7 +34,7 @@ fn held_delivery_workspace(startup: &Startup) -> Workspace {
 }
 
 fn fixture() -> (tempfile::TempDir, Startup) {
-    let root = tempfile::tempdir().unwrap();
+    let root = trusted_temp::tempdir();
     fs::create_dir(root.path().join("Data")).unwrap();
     for name in ["a", "z"] {
         let about = root.path().join("Mods").join(name).join("About");

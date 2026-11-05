@@ -6,6 +6,7 @@ mod preview_cancel;
 #[path = "window_receipt_budget.rs"]
 pub(super) mod receipt_budget;
 use crate::integrations::workshop::WorkshopClient;
+use crate::trusted_temp;
 use slint::Model;
 use std::{
     fs,
@@ -29,7 +30,7 @@ pub(super) fn wait(ws: &Workspace, ready: impl Fn(&Workspace) -> bool) {
     );
 }
 pub(super) fn fixture() -> (tempfile::TempDir, Workspace) {
-    let root = tempfile::tempdir().unwrap();
+    let root = trusted_temp::tempdir();
     fs::create_dir(root.path().join("Data")).unwrap();
     fs::create_dir(root.path().join("Mods")).unwrap();
     fs::write(

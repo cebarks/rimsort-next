@@ -1,3 +1,5 @@
+#[path = "support/trusted_temp.rs"]
+mod trusted_temp;
 use rimsort_rust::{
     domain::types::GameVersion,
     integrations::{install::Installer, workshop::PublishedFileId},
@@ -16,7 +18,7 @@ fn source(root: &std::path::Path, text: &str) {
 
 #[test]
 fn install_updates_owned_content_but_refuses_local_edits_and_unmanaged_targets() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let mods = temp.path().join("Mods");
     fs::create_dir(&mods).unwrap();
     let src = temp.path().join("download");
@@ -63,7 +65,7 @@ fn install_updates_owned_content_but_refuses_local_edits_and_unmanaged_targets()
 
 #[test]
 fn cancellation_invalid_metadata_and_lock_contention_do_not_publish() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let mods = temp.path().join("Mods");
     fs::create_dir(&mods).unwrap();
     let src = temp.path().join("download");
@@ -90,7 +92,7 @@ fn cancellation_invalid_metadata_and_lock_contention_do_not_publish() {
 
 #[test]
 fn separate_process_cannot_take_installation_lock() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let mods = temp.path().join("Mods");
     fs::create_dir(&mods).unwrap();
     let _installer = Installer::open(&mods).unwrap();
@@ -120,7 +122,7 @@ fn unrepresentable_paths_hard_links_and_sockets_are_refused() {
         os::unix::{ffi::OsStringExt, net::UnixListener},
     };
     for kind in ["name", "hardlink", "socket"] {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = trusted_temp::tempdir();
         let mods = temp.path().join("Mods");
         fs::create_dir(&mods).unwrap();
         let src = temp.path().join("source");
@@ -157,7 +159,7 @@ fn unrepresentable_paths_hard_links_and_sockets_are_refused() {
 #[test]
 fn links_are_never_followed_into_source_or_target() {
     use std::os::unix::fs::symlink;
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let mods = temp.path().join("Mods");
     fs::create_dir(&mods).unwrap();
     let src = temp.path().join("download");

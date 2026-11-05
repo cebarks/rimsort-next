@@ -99,6 +99,10 @@ pub(crate) fn no_links(path: &Path) -> Result<(), AcquisitionError> {
             return Err(refuse("parent traversal is forbidden"));
         }
         cursor.push(component);
+        // A Windows prefix alone is not the rooted path (including verbatim/UNC).
+        if matches!(component, std::path::Component::Prefix(_)) {
+            continue;
+        }
         match fs::symlink_metadata(&cursor) {
             Ok(m) if m.file_type().is_symlink() => {
                 return Err(refuse(format!("link refused: {}", cursor.display())));

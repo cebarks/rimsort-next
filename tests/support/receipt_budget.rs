@@ -2,9 +2,13 @@ use super::*;
 use serde_json::{Value, json};
 
 fn input(native: bool) -> FinalReport {
+    let root = std::env::temp_dir()
+        .canonicalize()
+        .unwrap()
+        .join("receipt-fixture");
     serde_json::from_value(json!({
         "schema_version":1,"request_id":"9".repeat(52),"source_generation":u64::MAX,"source_revision":u64::MAX,
-        "backend":if native {"SteamClient"} else {"SteamCmd"},"mods_root":"/fixture/Mods","executable":"/fixture/fake",
+        "backend":if native {"SteamClient"} else {"SteamCmd"},"mods_root":root.join("Mods"),"executable":root.join("fake"),
         "timeout_seconds":86400,"target_version":"1.6","requested_at":u64::MAX,"returned_at":null,
         "candidates":(1..=20).map(|id| json!({"id":id,"title":"title","app_id":294100,"kind":"ItemCandidate","upstream_updated":u64::MAX})).collect::<Vec<_>>(),
         "preview_diagnostics":"Actual preview diagnostic","error":null,
@@ -15,17 +19,27 @@ fn input(native: bool) -> FinalReport {
 
 // Independent serialized result oracle: protocol maxima, rather than calling the
 // admission shape generator. Includes inherited originals plus another uncertain run.
-fn maximum_result(input: &FinalReport) -> Value {
+fn maximum_result(input: &FinalReport, workspace: Option<&Path>) -> Value {
     let mut value = serde_json::to_value(input).unwrap();
     let message = "m".repeat(4094);
-    let path = format!("/{}", "\\".repeat(4095));
+    let prefix = input
+        .mods_root
+        .ancestors()
+        .last()
+        .unwrap()
+        .to_str()
+        .unwrap();
+    let path = format!("{prefix}{}", "\\".repeat(4096 - prefix.len()));
+    assert_eq!(path.len(), 4096);
+    assert!(Path::new(&path).is_absolute());
+    assert!(!path.chars().any(char::is_control));
     value["returned_at"] = json!(u64::MAX);
     value["error"] = json!(message);
     value["report"]["warnings"] = json!(["w".repeat(16380)]);
     value["report"]["cleanup_error"] = json!(message);
     value["report"]["recovery_required"] = json!(message);
     value["report"]["items"] = json!((1..=20).map(|id| {
-        let copies = if input.native.is_some() { vec![path.clone();2] } else { vec![format!("/fixture/Mods/{id}")] };
+        let copies = if input.native.is_some() { vec![path.clone();2] } else { vec![input.mods_root.join(id.to_string()).to_str().unwrap().to_owned()] };
         json!({"item_id":id,"subscription":"NotSubscribed","installations":copies.into_iter().map(|p|json!({"backend":"SteamClient","item_id":id,"path":p,"freshness":"UpdateAvailable"})).collect::<Vec<_>>(),"download":"NotStarted","outcome":"Cancelled","diagnostics":["d".repeat(16380)]})
     }).collect::<Vec<_>>());
     if let Some(native) = &input.native {
@@ -49,7 +63,7 @@ fn maximum_result(input: &FinalReport) -> Value {
         value["native"]["dropped_lines"] = json!(usize::MAX);
         value["native"]["dropped_bytes"] = json!(usize::MAX);
     } else {
-        value["report"]["runs"] = json!(["/fixture/workspace/run-abcdefghijklmnop"]);
+        value["report"]["runs"] = json!([workspace.unwrap().join("run-abcdefghijklmnop")]);
     }
     value
 }
@@ -60,12 +74,14 @@ fn admitted_maximum_results_and_resolutions_fit_atomic_cap_at_boundary() {
         for carried in [false, true] {
             let mut input = input(native);
             if native && carried {
-                let original = maximum_result(&input);
+                let original = maximum_result(&input, None);
                 input.native.as_mut().unwrap().pending =
                     serde_json::from_value(original["native"]["pending"].clone()).unwrap();
                 input.native.as_mut().unwrap().pending[0].resolved_by = None;
             }
-            let workspace = (!native).then_some(Path::new("/fixture/workspace"));
+            let workspace_root = input.mods_root.parent().unwrap().join("workspace");
+            assert!(workspace_root.is_absolute());
+            let workspace = (!native).then_some(workspace_root.as_path());
             let reserved = required_bytes(&input, workspace).unwrap();
             assert!(
                 reserved < 4 * 1024 * 1024,
@@ -76,7 +92,7 @@ fn admitted_maximum_results_and_resolutions_fit_atomic_cap_at_boundary() {
                 .push_str(&"x".repeat(4 * 1024 * 1024 - reserved));
             assert_eq!(required_bytes(&input, workspace).unwrap(), 4 * 1024 * 1024);
             check(&input, workspace).unwrap();
-            let result = maximum_result(&input);
+            let result = maximum_result(&input, workspace);
             let bytes = serde_json::to_vec(&result).unwrap();
             assert!(
                 bytes.len() <= 4 * 1024 * 1024,
@@ -95,6 +111,19 @@ fn admitted_maximum_results_and_resolutions_fit_atomic_cap_at_boundary() {
             );
             assert_eq!(std::fs::read(file).unwrap(), bytes);
         }
+    }
+}
+
+#[test]
+fn captured_fixture_paths_are_host_absolute_and_share_the_trusted_temp_base() {
+    let base = std::env::temp_dir().canonicalize().unwrap();
+    for native in [false, true] {
+        let input = input(native);
+        for path in [&input.mods_root, &input.executable] {
+            assert!(path.is_absolute(), "{}", path.display());
+            assert!(path.starts_with(&base), "{}", path.display());
+        }
+        assert_eq!(input.mods_root.parent(), input.executable.parent());
     }
 }
 

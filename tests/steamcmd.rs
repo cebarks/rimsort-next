@@ -1,4 +1,6 @@
 #![cfg(target_os = "linux")]
+#[path = "support/trusted_temp.rs"]
+mod trusted_temp;
 use rimsort_rust::{
     application::acquisition::{DownloadOutcome, ItemOutcome},
     domain::types::GameVersion,
@@ -43,7 +45,7 @@ for line in script.splitlines():
 
 #[test]
 fn real_process_is_isolated_and_only_proven_content_is_published() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let cfg = config(temp.path(), SUCCESS);
     let id = PublishedFileId::try_from(42).unwrap();
     let report = run_downloads(&cfg, &[id], &AtomicBool::new(false), &mut |_| {}).unwrap();
@@ -58,7 +60,7 @@ fn real_process_is_isolated_and_only_proven_content_is_published() {
 #[test]
 fn sgr_wrapped_real_receipts_publish_only_proven_content_and_failure_wins() {
     for failed in [false, true] {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = trusted_temp::tempdir();
         let fixture = SUCCESS.replace("        print(", "        # print(");
         let mut body = format!(
             "{fixture}\n{}",
@@ -107,7 +109,7 @@ fn zero_exit_without_item_success_and_explicit_failure_never_install() {
         "print('Success. Downloaded item 999 to x')",
         "print('ERROR! Download item 42 failed (Failure).')",
     ] {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = trusted_temp::tempdir();
         let cfg = config(temp.path(), body);
         let report = run_downloads(
             &cfg,
@@ -123,7 +125,7 @@ fn zero_exit_without_item_success_and_explicit_failure_never_install() {
 
 #[test]
 fn bounded_streams_and_deadline_do_not_hang() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let mut cfg = config(
         temp.path(),
         "import os,time\nfor i in range(5000):\n os.write(1,b'x'*80+b'\\n'); os.write(2,b'y'*80+b'\\n')\ntime.sleep(30)",
@@ -146,7 +148,7 @@ fn bounded_streams_and_deadline_do_not_hang() {
 
 #[test]
 fn later_spawn_failure_retains_completed_batch_facts() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let cfg = config(
         temp.path(),
         &format!("{SUCCESS}\npathlib.Path(sys.argv[0]).unlink()"),
@@ -166,7 +168,7 @@ fn later_spawn_failure_retains_completed_batch_facts() {
 
 #[test]
 fn failed_update_retains_separate_existing_copy_observation() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let cfg = config(temp.path(), SUCCESS);
     let id = PublishedFileId::try_from(42).unwrap();
     run_downloads(&cfg, &[id], &AtomicBool::new(false), &mut |_| {}).unwrap();
@@ -186,7 +188,7 @@ fn failed_update_retains_separate_existing_copy_observation() {
 fn cancellation_stops_owned_descendants_not_unrelated_processes() {
     use rimsort_rust::application::acquisition::AcquisitionEvent;
     use std::sync::atomic::Ordering;
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let cfg = config(
         temp.path(),
         "import subprocess,time\nchild=subprocess.Popen(['/usr/bin/sleep','30'])\nprint('READY '+str(child.pid),flush=True)\ntime.sleep(30)",
@@ -223,7 +225,7 @@ fn cancellation_stops_owned_descendants_not_unrelated_processes() {
 
 #[test]
 fn overlong_lines_cannot_smuggle_success_or_force_unbounded_retention() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let cfg = config(temp.path(), &format!("{SUCCESS}\nprint('x'*1000000)"));
     let report = run_downloads(
         &cfg,
@@ -238,7 +240,7 @@ fn overlong_lines_cannot_smuggle_success_or_force_unbounded_retention() {
 
 #[test]
 fn escaped_pipe_holder_reports_cleanup_failure_instead_of_hanging() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let mut cfg = config(temp.path(), SUCCESS);
     let previous = run_downloads(
         &cfg,
@@ -306,7 +308,7 @@ fn escaped_pipe_holder_reports_cleanup_failure_instead_of_hanging() {
 #[test]
 fn recovery_fault_stops_later_batches_and_is_reported_for_phase_b_gates() {
     use rimsort_rust::application::acquisition::AcquisitionEvent;
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let cfg = config(temp.path(), SUCCESS);
     let ids: Vec<_> = (1..=21)
         .map(|id| PublishedFileId::try_from(id).unwrap())
@@ -340,7 +342,7 @@ fn recovery_fault_stops_later_batches_and_is_reported_for_phase_b_gates() {
 #[test]
 fn workspace_failure_after_a_batch_preserves_completed_facts() {
     use rimsort_rust::application::acquisition::AcquisitionEvent;
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let cfg = config(temp.path(), SUCCESS);
     let ids: Vec<_> = (1..=21)
         .map(|id| PublishedFileId::try_from(id).unwrap())
@@ -372,7 +374,7 @@ fn captured_worker_records_resolved_timestamp_without_activating_content() {
             workshop::{WorkshopItem, WorkshopKind},
         },
     };
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let cfg = config(temp.path(), SUCCESS);
     let id = PublishedFileId::try_from(42).unwrap();
     let request = AcquisitionRequest {
@@ -405,7 +407,7 @@ fn captured_worker_records_resolved_timestamp_without_activating_content() {
 
 #[test]
 fn out_of_order_partial_failure_is_correlated_by_id_across_streams() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let cfg = config(
         temp.path(),
         &format!("{SUCCESS}\nprint('ERROR! Download item 42 failed (Failure).',file=sys.stderr)"),
@@ -424,7 +426,7 @@ fn out_of_order_partial_failure_is_correlated_by_id_across_streams() {
 #[test]
 fn active_buffered_output_drain_uses_batch_deadline_not_short_idle_grace() {
     use rimsort_rust::application::acquisition::AcquisitionEvent;
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let cfg = config(
         temp.path(),
         &format!(
@@ -452,7 +454,7 @@ fn active_buffered_output_drain_uses_batch_deadline_not_short_idle_grace() {
 
 #[test]
 fn receipt_after_log_retention_limit_still_proves_download() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let cfg = config(
         temp.path(),
         &format!(
@@ -480,7 +482,7 @@ fn receipt_after_log_retention_limit_still_proves_download() {
 fn cancellation_between_batches_preserves_completed_installs() {
     use rimsort_rust::application::acquisition::AcquisitionEvent;
     use std::sync::atomic::Ordering;
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let cfg = config(temp.path(), SUCCESS);
     let cancel = AtomicBool::new(false);
     let ids: Vec<_> = (1..=21)
@@ -507,7 +509,7 @@ fn cancellation_between_batches_preserves_completed_installs() {
 
 #[test]
 fn script_rejects_injection_and_oversize_batch() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = trusted_temp::tempdir();
     let mut cfg = config(temp.path(), "pass");
     let id = PublishedFileId::try_from(42).unwrap();
     cfg.workspace = temp.path().join("evil\"\nquit");
