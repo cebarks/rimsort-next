@@ -4,8 +4,9 @@ Task6 execution evidence is **pre-independent-final-review**, not self-acceptanc
 The [final review](reviews/final-review.md) remains pending. Linux x86_64 controlled
 fixtures, headless callbacks, graphical startup and live-account behavior are
 separate proof categories. The Task6 change tree based on accepted `cef01143`
-passed the current commands below before the local handoff commit; no product or
-test changes followed those gates.
+passed the historical commands below before its handoff commit. The subsequent
+consolidated final-fix wave has separate fresh evidence below; historical gates
+are not claims about the changed source.
 
 ## Reproduce automated checks
 
@@ -59,8 +60,11 @@ the separately saved named profile, and retains the exact receipt bytes.
 The M2 regression uses real strict protocol/process supervision with malformed
 OLD Before metadata and valid matching Current After metadata. Historical errors
 and SDK outcome remain; Download usability derives from After. A covering Inspect
-resolves a pending Download without rewriting its original acknowledgement,
-failed process receipt or item facts. No schema/provider change is introduced.
+resolves a pending Download without rewriting its original protocol-valid Unknown
+outcome, `Download pending` failure detail, false acknowledgement, or ProcessFailed
+receipt. The regression explicitly checks complete protocol/no protocol error and
+those original fields before reconciliation; separate Subscribe crash fixtures
+prove accepted subscription acknowledgement retention. No schema/provider change is introduced.
 
 ## Attached carried checks and limits
 
@@ -96,9 +100,11 @@ warnings, if present, are recorded rather than mistaken for live desktop proof.
 
 ## Integrity and documentation audit
 
-Original-source checks use `git --no-optional-locks` and compare against the
-previously captured baseline, not a newly invented clean state: Python main
-`bbe8aac6` with only untracked `.rpiv/`; original native-slint `59c681de` with
+Original-source checks use `git --no-optional-locks`. The initial snapshot was
+Python main `bbe8aac6` with only untracked `.rpiv/`; during the final-fix wave it
+was already `2e394a12` (watchdog dependency update), still with `.rpiv/` untracked.
+That user advancement is preserved, not restored or attributed to this wave.
+The original native-slint snapshot is `59c681de` with
 modified `src/ui/window.rs`, `ui/main.slint`, and untracked `tests/window_drag.rs`.
 No earlier dirty-file byte hashes were captured, so status/ref equality cannot
 claim byte-for-byte preservation. The baseline import tree is recorded in
@@ -115,7 +121,7 @@ tracked secret/SDK/session/build-output paths before local commits. No push/PR.
 | Original/private provenance | provenance, baseline review, verification |
 | Inherited plans versus current capability | offline-milestone, basic-core plan, parity, capabilities |
 
-## Recorded current execution results
+## Historical Task6 execution results
 
 - Linux x86_64, kernel `7.2.11-cachyos1.lto.fc44.x86_64`, Rust/Cargo 1.99.1.
 - Jobs4 `just check`: PASS fmt, strict workspace/all-target Clippy,
@@ -158,12 +164,15 @@ tracked secret/SDK/session/build-output paths before local commits. No push/PR.
 - Isolated release CLI help exits 0; invalid option exits 1 (Rust main Result),
   before Slint or app-data creation. An initial probe incorrectly expected 2;
   the oracle was corrected from source and rerun. This is separate from native proof.
-- Original refs/status match the captured baseline; private GitHub metadata is
+- At the historical Task6 capture, original refs/status matched its baseline;
+  the later main advancement is described above. Private GitHub metadata was
   private/non-fork, origin only `git@github.com:cebarks/rimsort-next.git`.
   No changed dependency pins or tracked SDK/session/output/credential-pattern
   matches were found in the bounded audit. No publishing/push/PR occurred.
 
-Historical failures are retained in the private execution report: M2 RED,
+## Consolidated final-fix verification\n\nThe final-fix wave reproduces historical SteamCMD cleanup loss, clean qualified-token\nLaunch mismatch, ineffective Cancel, oversized GUI confirmation and the invalid\nDownload witness. Its actual callback fixtures include held HTTP200 and503, the\nidentified live escaped test descendant through reopen, an acquired Workshop copy\nfollowed by explicit Refresh, 10,000 candidates with128-byte titles and explicit\n20-item first/next operations, all20 native results, original pending items/runs,\nnormal Close/reopen and exact-byte failed-write retry with no new request.\n\nIndependent serialized maxima exercise actual JSON escaping, raw protocol limits,\ncurrent+pending duplication, inherited originals and Inspect/ack growth. At the\n4MiB admission boundary the generated result writes and reads atomically; one\nadditional known byte is refused. Both backends refuse near-cap public metadata\nbefore confirmation/dispatch; carried legacy300-identity pending evidence likewise\nrefuses a new Inspect with carried originals without changing old bytes or sending
+a helper request. The real20-item mutation/Inspect scenario separately proves full
+covering reconciliation.\nProse-only shortening visibly counts omitted bytes and preserves UTF-8. Original\nSDK observations, outcomes, details and unknown identities are not shortened.\n\nFinal workspace/release/isolation/native/audit results are pending consumption.\nGraphical evidence will be separate from headless proofs, with default/minimum\nwindow screenshots on the final release binary. No live SDK/account, other-platform\nruntime, publication-panic injection or universal performance proof is claimed.\n\nHistorical failures are retained in the private execution report: M2 RED,
 fixture content outside discovery roots, a test-only slice argument mismatch,
 and rustfmt after late test additions. All current source/test gates above
 passed after correction. Publication-panic runtime injection, real SDK/account,

@@ -62,7 +62,8 @@ const COMPLETE: &str = r#"
 for i in r['ids']:
  for phase in ['before','after']:
   emit(dict(kind='observation',item_id=i,phase=phase,facts=dict(subscription='unknown',install=None)))
- emit(dict(kind='outcome',item_id=i,outcome='observed' if r['action']=='inspect' else 'acknowledged',detail=None))
+ outcome = {'inspect':'observed','download':'unknown','subscribe':'acknowledged','unsubscribe':'acknowledged'}[r['action']]
+ emit(dict(kind='outcome',item_id=i,outcome=outcome,detail=dict(stage='complete',kind='timed_out',message='Download pending') if r['action']=='download' else None))
 emit(dict(kind='terminal'))
 "#;
 #[test]
@@ -306,6 +307,38 @@ emit(dict(kind='terminal'))
     let failed = COMPLETE.to_owned() + "\nsys.exit(7)\n";
     let (original, _, error) = run(root.path(), &failed, &[42], Action::Download);
     assert!(error.is_some() && original.uncertain());
+    assert_eq!(original.runs[0].status, "ProcessFailed");
+    assert!(original.runs[0].protocol_complete);
+    assert!(original.runs[0].protocol_error.is_none());
+    assert_eq!(
+        original.runs[0].exit_status.as_deref(),
+        Some("exit status: 7")
+    );
+    assert!(
+        original.runs[0].leader_reaped
+            && original.runs[0].stdin_closed
+            && original.runs[0].stdout_eof
+            && original.runs[0].stderr_eof
+    );
+    assert!(!original.runs[0].cleanup_uncertain);
+    assert_eq!(
+        original.items[0].failure.as_ref().unwrap().stage,
+        steam_protocol::FailureStage::Complete
+    );
+    assert_eq!(
+        original.items[0].failure.as_ref().unwrap().kind,
+        steam_protocol::FailureKind::TimedOut
+    );
+    assert_eq!(
+        original.items[0].outcome,
+        Some(steam_protocol::Outcome::Unknown)
+    );
+    assert_eq!(
+        original.items[0].failure.as_ref().unwrap().message,
+        "Download pending"
+    );
+    assert!(!original.items[0].acknowledgement);
+    assert_eq!(original.pending.len(), 1);
     let mut refreshed = NativeReport::new(Action::Inspect, None);
     refreshed.pending = original.pending.clone();
     let config = SteamClientConfig {

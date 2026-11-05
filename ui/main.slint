@@ -6,7 +6,7 @@
 // or re-picks anything. Keyboard editing, safe save/launch, Reset and validation are wired;
 // drag reordering is not offered.
 
-import { Button, CheckBox, LineEdit, ListView, ScrollView, GroupBox } from "std-widgets.slint";
+import { Button, CheckBox, LineEdit, ListView, ScrollView, Palette } from "std-widgets.slint";
 import { RulesPanel } from "rules.slint";
 
 export { ProfilesWindow, ProfileRow } from "profiles.slint";
@@ -156,10 +156,11 @@ export component MainWindow inherits Window {
     
                 // Available mods.
                 VerticalLayout {
-                    min-width: 280px;
+                    min-width: 220px;
                     HorizontalLayout {
                         spacing: 6px;
                         LineEdit {
+                            min-width: 0px;
                             placeholder-text: "Search available mods";
                             text <=> root.inactive-search;
                             edited(text) => { root.inactive-searched(text); }
@@ -216,10 +217,11 @@ export component MainWindow inherits Window {
     
                 // Active load order.
                 VerticalLayout {
-                    min-width: 340px;
+                    min-width: 300px;
                     HorizontalLayout {
                         spacing: 6px;
                         LineEdit {
+                            min-width: 0px;
                             placeholder-text: "Search active mods";
                             text <=> root.active-search;
                             edited(text) => { root.active-searched(text); }
@@ -320,79 +322,82 @@ export component MainWindow inherits Window {
                     }
                 }
     
-                // Inspector.
-                // One width-constrained, scrollable column: settings above details, stacked in the
-                // same order they are read. Two GroupBoxes were previously direct children of the
-                // ScrollView with no layout between them, which let them overlap and clip.
+                // Settings and details share one width-constrained, scrollable column.
                 ScrollView {
-                    min-width: 340px;
+                    min-width: 300px;
                     VerticalLayout {
                         spacing: 10px;
-                        GroupBox {
-                            title: "Paths and behaviour";
+                        VerticalLayout {
+                            Text { text: "Paths and behaviour"; color: #e8ecf5; font-weight: 700; }
                         VerticalLayout {
                             spacing: 4px;
-                            HorizontalLayout {
-                                spacing: 6px;
-                                Text { text: "Game root"; color: #b9c4da; width: 170px; vertical-alignment: center; font-size: 11px; }
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Game root"; color: #b9c4da; font-size: 11px; }
                                 LineEdit {
                                     text: root.set-game-root;
                                     edited(value) => { root.edit-field("game-root", value); }
                                 }
                             }
-                            HorizontalLayout {
-                                spacing: 6px;
-                                Text { text: "Content root"; color: #b9c4da; width: 170px; vertical-alignment: center; font-size: 11px; }
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Content root"; color: #b9c4da; font-size: 11px; }
                                 LineEdit {
                                     text: root.set-content-root;
                                     edited(value) => { root.edit-field("content-root", value); }
                                 }
                             }
-                            HorizontalLayout {
-                                spacing: 6px;
-                                Text { text: "Config file"; color: #b9c4da; width: 170px; vertical-alignment: center; font-size: 11px; }
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Config file"; color: #b9c4da; font-size: 11px; }
                                 LineEdit {
                                     text: root.set-config-path;
                                     edited(value) => { root.edit-field("config-path", value); }
                                 }
                             }
-                            HorizontalLayout {
-                                spacing: 6px;
-                                Text { text: "Local mods root"; color: #b9c4da; width: 170px; vertical-alignment: center; font-size: 11px; }
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Local mods root"; color: #b9c4da; font-size: 11px; }
                                 LineEdit {
                                     text: root.set-local-mods-root;
                                     edited(value) => { root.edit-field("local-mods-root", value); }
                                 }
                             }
-                            HorizontalLayout {
-                                spacing: 6px;
-                                Text { text: "Workshop root (optional)"; color: #b9c4da; width: 170px; vertical-alignment: center; font-size: 11px; }
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Workshop root (optional)"; color: #b9c4da; font-size: 11px; }
                                 LineEdit {
                                     text: root.set-workshop-root;
                                     edited(value) => { root.edit-field("workshop-root", value); }
                                 }
                             }
-                            HorizontalLayout {
-                                spacing: 6px;
-                                Text { text: "Executable override (optional)"; color: #b9c4da; width: 170px; vertical-alignment: center; font-size: 11px; }
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Executable override (optional)"; color: #b9c4da; font-size: 11px; }
                                 LineEdit {
                                     text: root.set-executable-override;
                                     edited(value) => { root.edit-field("executable-override", value); }
                                 }
                             }
-                            HorizontalLayout {
-                                spacing: 6px;
-                                Text { text: "Target version"; color: #b9c4da; width: 170px; vertical-alignment: center; font-size: 11px; }
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Target version"; color: #b9c4da; font-size: 11px; }
                                 LineEdit {
                                     placeholder-text: "1.5.4171";
                                     text: root.set-target-version;
                                     edited(value) => { root.edit-field("target-version", value); }
                                 }
                             }
-                            CheckBox {
-                                text: "Ask before saving or launching over content findings";
-                                checked: root.set-confirm-warnings;
-                                toggled => { root.toggle-warnings(self.checked); }
+                            Rectangle {
+                                background: Palette.background;
+                                VerticalLayout {
+                                    padding: 6px;
+                                    CheckBox {
+                                        text: "Ask before saving or launching\nover content findings";
+                                        checked: root.set-confirm-warnings;
+                                        toggled => { root.toggle-warnings(self.checked); }
+                                    }
+                                }
                             }
                             HorizontalLayout {
                                 spacing: 8px;
@@ -402,8 +407,8 @@ export component MainWindow inherits Window {
                             Text { text: root.settings-note; color: #d8b25a; font-size: 11px; wrap: word-wrap; }
                         }
                     }
-                    GroupBox {
-                        title: "Mod details";
+                    VerticalLayout {
+                        Text { text: "Mod details"; color: #e8ecf5; font-weight: 700; }
                         VerticalLayout {
                             spacing: 4px;
                             Text { text: root.inspector-title; color: #f0f3fa; font-size: 15px; wrap: word-wrap; }
@@ -419,8 +424,8 @@ export component MainWindow inherits Window {
             }
         }
 
-        GroupBox {
-            title: "Session validation";
+        VerticalLayout {
+            Text { text: "Session validation"; color: #e8ecf5; font-weight: 700; }
             height: 110px;
             VerticalLayout {
                 if root.read-only : Text { text: "Load an installation to validate its active list."; color: #b9c4da; }
@@ -470,7 +475,9 @@ export component MainWindow inherits Window {
                 text: "Close";
                 clicked => { root.close-window(); }
             }
-            Text { text: root.status; color: #cfd8ea; font-size: 12px; vertical-alignment: center; }
+        }
+        HorizontalLayout {
+            Text { text: root.status; color: #cfd8ea; font-size: 12px; wrap: word-wrap; }
             Text { text: root.progress; color: #7f8aa3; font-size: 12px; vertical-alignment: center; }
             Text {
                 text: root.dirty ? "Unapplied game changes" : "Matches game baseline";

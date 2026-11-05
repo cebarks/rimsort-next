@@ -3,6 +3,7 @@ use super::acquisition::*;
 use crate::{
     domain::types::GameVersion,
     integrations::{
+        acquisition_state::budget::{MESSAGE_BYTES, diagnostic},
         install::validate_about,
         steam_client::{self, RunStatus, SteamClientConfig},
         workshop::PublishedFileId,
@@ -228,19 +229,27 @@ pub fn run(
         }
         report.runs.push(NativeRun {
             request_id: request.request_id,
-            status: format!("{:?}", returned.status),
+            status: diagnostic(&format!("{:?}", returned.status), MESSAGE_BYTES),
             protocol_complete: returned.protocol_complete,
-            protocol_error: returned.protocol_error,
-            error: returned.error,
-            input_error: returned.input_error,
-            exit_status: returned.exit_status.map(|s| s.to_string()),
+            protocol_error: returned
+                .protocol_error
+                .map(|s| diagnostic(&s, MESSAGE_BYTES)),
+            error: returned.error.map(|s| diagnostic(&s, MESSAGE_BYTES)),
+            input_error: returned.input_error.map(|s| diagnostic(&s, MESSAGE_BYTES)),
+            exit_status: returned
+                .exit_status
+                .map(|s| diagnostic(&s.to_string(), MESSAGE_BYTES)),
             spawned: returned.cleanup.spawned,
             leader_reaped: returned.cleanup.leader_reaped,
             stdin_closed: returned.cleanup.stdin_closed,
             stdout_eof: returned.cleanup.stdout_eof,
             stderr_eof: returned.cleanup.stderr_eof,
             termination_requested: returned.cleanup.termination_requested,
-            termination_error: returned.cleanup.termination_error.clone(),
+            termination_error: returned
+                .cleanup
+                .termination_error
+                .as_ref()
+                .map(|s| diagnostic(s, MESSAGE_BYTES)),
             detached_workers: returned.cleanup.detached_workers,
             cleanup_uncertain: returned.cleanup.uncertain(),
         });
@@ -295,7 +304,10 @@ pub fn run(
                         });
                     }
                     Err(e) => {
-                        let message = format!("{}: unusable mod metadata: {e}", path.display());
+                        let message = diagnostic(
+                            &format!("{}: unusable mod metadata: {e}", path.display()),
+                            MESSAGE_BYTES,
+                        );
                         if !item.validation_errors.contains(&message) {
                             item.validation_errors.push(message);
                         }

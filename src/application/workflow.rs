@@ -1042,6 +1042,21 @@ impl Workflow {
             return;
         }
 
+        if step == OperationKind::Launch
+            && let Err(error) = prepare_save(
+                session.loaded_config(),
+                session.working_entries(),
+                session.catalog(),
+            )
+        {
+            self.finish_operation();
+            effects.push(reported(step, format!(
+                "{}; Launch refused. Use Refresh to explicitly reload game tokens against the current catalog, or resolve the selected copy before applying.",
+                OperationFailure::from_error(&error).message
+            )));
+            return;
+        }
+
         if let Some(issues) = self.unconfirmed(step, session) {
             let prompt = PromptId(Self::take_id());
             self.awaiting = Some(Awaiting {

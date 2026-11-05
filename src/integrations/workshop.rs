@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     io::Read,
+    sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 
@@ -123,8 +124,20 @@ impl WorkshopClient {
         }
     }
     pub fn resolve(&self, ids: &[PublishedFileId]) -> WorkshopPreview {
+        self.resolve_cancellable(ids, &AtomicBool::new(false))
+            .unwrap_or_default()
+    }
+    pub(crate) fn resolve_cancellable(
+        &self,
+        ids: &[PublishedFileId],
+        cancel: &AtomicBool,
+    ) -> Option<WorkshopPreview> {
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
         let mut resolution = Resolution {
             client: self,
+            cancel,
             preview: WorkshopPreview::default(),
             cache: HashMap::new(),
             visited: HashSet::new(),
@@ -133,15 +146,20 @@ impl WorkshopClient {
             if let Some(id) = ids.first() {
                 resolution.error(*id, "selection exceeds 10000 IDs");
             }
-            return resolution.preview;
+            return Some(resolution.preview);
         }
         resolution.load(ids);
         for id in ids {
             resolution.visit(*id, &mut Vec::new());
         }
-        resolution.preview
+        (!cancel.load(Ordering::Relaxed)).then_some(resolution.preview)
     }
-    fn request(&self, method: &str, ids: &[PublishedFileId]) -> Result<serde_json::Value, String> {
+    fn request(
+        &self,
+        method: &str,
+        ids: &[PublishedFileId],
+        cancel: &AtomicBool,
+    ) -> Result<serde_json::Value, String> {
         let count = if method == "GetPublishedFileDetails" {
             "itemcount"
         } else {
@@ -154,11 +172,17 @@ impl WorkshopClient {
                 .map(|(i, id)| (format!("publishedfileids[{i}]"), id.get().to_string())),
         );
         for attempt in 0..=3 {
+            if cancel.load(Ordering::Relaxed) {
+                return Err("Public preview cancelled".into());
+            }
             let mut response = self
                 .agent
                 .post(format!("{}/ISteamRemoteStorage/{method}/v1/", self.base))
                 .send_form(form.iter().map(|(key, value)| (key, value)))
                 .map_err(|e| e.to_string())?;
+            if cancel.load(Ordering::Relaxed) {
+                return Err("Public preview cancelled".into());
+            }
             let status = response.status().as_u16();
             if matches!(status, 429 | 500 | 502 | 503 | 504) && attempt < 3 {
                 std::thread::sleep(Duration::from_millis(50 << attempt));
@@ -174,6 +198,9 @@ impl WorkshopClient {
                 .take(MAX_RESPONSE + 1)
                 .read_to_end(&mut bytes)
                 .map_err(|e| e.to_string())?;
+            if cancel.load(Ordering::Relaxed) {
+                return Err("Public preview cancelled".into());
+            }
             if bytes.len() as u64 > MAX_RESPONSE {
                 return Err("response exceeds 4 MiB".into());
             }
@@ -190,6 +217,7 @@ struct Resolved {
 }
 struct Resolution<'a> {
     client: &'a WorkshopClient,
+    cancel: &'a AtomicBool,
     preview: WorkshopPreview,
     cache: HashMap<PublishedFileId, Result<Resolved, String>>,
     visited: HashSet<PublishedFileId>,
@@ -202,6 +230,9 @@ impl Resolution<'_> {
         });
     }
     fn load(&mut self, ids: &[PublishedFileId]) -> bool {
+        if self.cancel.load(Ordering::Relaxed) {
+            return false;
+        }
         let mut seen = HashSet::new();
         let missing: Vec<_> = ids
             .iter()
@@ -215,13 +246,16 @@ impl Resolution<'_> {
             return false;
         }
         for batch in missing.chunks(100) {
+            if self.cancel.load(Ordering::Relaxed) {
+                return false;
+            }
             let details = self
                 .client
-                .request("GetPublishedFileDetails", batch)
+                .request("GetPublishedFileDetails", batch, self.cancel)
                 .and_then(|v| rows(v, "publishedfiledetails", batch));
             let collections = self
                 .client
-                .request("GetCollectionDetails", batch)
+                .request("GetCollectionDetails", batch, self.cancel)
                 .and_then(|v| rows(v, "collectiondetails", batch));
             for id in batch {
                 let resolved = match (&details, &collections) {
@@ -234,6 +268,9 @@ impl Resolution<'_> {
         true
     }
     fn visit(&mut self, id: PublishedFileId, ancestors: &mut Vec<PublishedFileId>) {
+        if self.cancel.load(Ordering::Relaxed) {
+            return;
+        }
         if ancestors.contains(&id) {
             self.error(id, "collection cycle detected");
             return;

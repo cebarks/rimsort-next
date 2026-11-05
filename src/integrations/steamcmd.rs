@@ -157,6 +157,7 @@ pub(crate) fn run_downloads_with_updates(
         }
         let run = match tempfile::Builder::new()
             .prefix("run-")
+            .rand_bytes(super::acquisition_state::budget::RUN_RANDOM_BYTES)
             .tempdir_in(&config.workspace)
         {
             Ok(run) => run.keep(),

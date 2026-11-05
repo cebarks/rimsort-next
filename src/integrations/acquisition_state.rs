@@ -8,6 +8,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub(crate) mod budget;
+
 const LIMIT: u64 = 4 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

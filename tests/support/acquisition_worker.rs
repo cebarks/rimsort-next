@@ -5,6 +5,8 @@ use std::{fs, sync::mpsc};
 pub(in crate::ui::window) fn post_return_receipt_and_late_success() {
     held_boundary(false);
     held_boundary(true);
+    twenty_native_results_retry_exact_receipt_without_dispatch();
+    relative_data_directory_captures_absolute_workspace();
     let completed_while_held = [native_held_progress(false), native_held_progress(true)];
     assert_eq!(
         completed_while_held,
@@ -12,6 +14,84 @@ pub(in crate::ui::window) fn post_return_receipt_and_late_success() {
         "native cancellation/deadline must persist and reap without the UI inbox"
     );
 }
+fn relative_data_directory_captures_absolute_workspace() {
+    let (root, initial) = fixture();
+    let cwd = std::env::current_dir().unwrap();
+    let parents = cwd
+        .components()
+        .filter(|c| matches!(c, std::path::Component::Normal(_)))
+        .count();
+    let relative = PathBuf::from("../".repeat(parents))
+        .join(root.path().strip_prefix("/").unwrap())
+        .join("private/settings.json");
+    assert!(relative.is_relative());
+    let settings = initial.state.app.lock().unwrap().target.settings.clone();
+    let ws = Workspace::open(&Startup {
+        target: RefreshTarget { settings },
+        basis: Some(root.path().into()),
+        platform: Platform::Linux,
+        settings_file: Some(relative),
+    })
+    .unwrap();
+    ws.begin();
+    wait(&ws, |w| {
+        w.installed() && w.with_acquisition(|a| !a.get_busy())
+    });
+    prepared(&ws, root.path(), "", "900");
+    ws.with_acquisition(|w| w.invoke_acquire());
+    {
+        let app = ws.state.app.lock().unwrap();
+        let (request, _) = app
+            .acquisition
+            .question
+            .as_ref()
+            .expect("relative data dir remains usable")
+            .request
+            .as_ref()
+            .unwrap();
+        let WorkerRequest::SteamCmd(request) = request else {
+            panic!("SteamCMD request expected")
+        };
+        assert!(
+            request.config.workspace.is_absolute(),
+            "future run path must include its entire captured prefix"
+        );
+    }
+    ws.with_acquisition(|w| w.invoke_answer_question(w.get_question_token(), "cancel".into()));
+    assert!(!root.path().join("private/acquisition-workspace").exists());
+}
+
+fn twenty_native_results_retry_exact_receipt_without_dispatch() {
+    use super::super::native_acquisition_tests as fixture_native;
+    let (root, ws) = fixture();
+    let helper = fixture_native::helper(root.path(), "");
+    fixture_native::configure(&ws, &helper);
+    fixture_native::preview(&ws, &(1..=20).collect::<Vec<_>>());
+    let history = root.path().join("private/last-acquisition.json");
+    fs::create_dir(&history).unwrap();
+    fixture_native::start(&ws, "subscribe");
+    wait(&ws, |w| w.with_acquisition(|a| !a.get_busy()));
+    let captured = {
+        let app = ws.state.app.lock().unwrap();
+        assert!(!app.acquisition.persisted);
+        let report = app.acquisition.final_report.as_ref().unwrap();
+        assert_eq!(report.native.as_ref().unwrap().items.len(), 20);
+        assert_eq!(report.native.as_ref().unwrap().pending[0].items.len(), 20);
+        serde_json::to_vec(report).unwrap()
+    };
+    let requests = fs::read(root.path().join("requests")).unwrap();
+    ws.with_acquisition(|w| {
+        w.invoke_acknowledge_native();
+        assert!(w.get_question_token().is_empty());
+    });
+    fs::remove_dir(&history).unwrap();
+    ws.with_acquisition(|w| w.invoke_retry_report());
+    wait(&ws, |w| w.with_acquisition(|a| !a.get_busy()));
+    assert_eq!(fs::read(history).unwrap(), captured);
+    assert_eq!(fs::read(root.path().join("requests")).unwrap(), requests);
+    assert_eq!(String::from_utf8(requests).unwrap().lines().count(), 1);
+}
+
 fn native_held_progress(deadline: bool) -> bool {
     use super::super::native_acquisition_tests as native_fixture;
     let (root, ws) = fixture();

@@ -18,6 +18,10 @@ export component AcquisitionWindow inherits Window {
     in property <bool> library-changed;
     in property <string> status;
     in property <string> preview-text;
+    in property <string> page-status;
+    in property <bool> can-previous;
+    in property <bool> can-next;
+    callback change-page(int);
     in property <string> facts;
     in property <string> logs;
     in-out property <string> executable;
@@ -68,10 +72,15 @@ export component AcquisitionWindow inherits Window {
         HorizontalLayout {
             Button { text: "Public preview"; enabled: !root.busy; clicked => { root.preview(input.text); } }
             Button { text: "Workshop in browser"; clicked => { root.open-workshop(); } }
-            Button { text: root.native-backend ? "Run selected native action" : "Download preview candidates"; enabled: !root.busy; clicked => { root.acquire(); } }
+            Button { text: root.native-backend ? "Run native action on this batch" : "Download this batch"; enabled: !root.busy; clicked => { root.acquire(); } }
             Button { text: "Cancel operation"; enabled: root.busy; clicked => { root.cancel-operation(); } }
         }
         Text { text: "Cancel/close stops only the owned helper, not acknowledged subscriptions or external Steam downloads. Unsubscribe does not prove files were removed."; wrap: word-wrap; }
+        HorizontalLayout {
+            Button { text: "Previous batch"; enabled: root.can-previous; clicked => { root.change-page(-1); } }
+            Text { text: root.page-status; wrap: word-wrap; }
+            Button { text: "Next batch"; enabled: root.can-next; clicked => { root.change-page(1); } }
+        }
         ScrollView { preferred-height: 130px; Text { text: root.preview-text; wrap: word-wrap; } }
         if root.question-token != "": GroupBox {
             title: root.close-question ? "Close during acquisition?" : "Confirm game closed";

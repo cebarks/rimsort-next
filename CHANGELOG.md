@@ -17,6 +17,19 @@
 
 ### Fixed
 
+- Acquisition operations explicitly confirm at most 20 candidates per page while
+  retaining 10,000-item public preview. Exact captured inputs plus bounded future
+  receipts/origins/resolutions must fit 4 MiB before dispatch; oversized operations
+  are refused without effects. Ordinary diagnostic shortening is visibly counted,
+  never applied to SDK observations, failure details or unresolved identities.
+- Historical SteamCMD cleanup uncertainty remains a hard gate after restart;
+  filesystem recovery is not process-cleanup evidence.
+- Clean Launch checks the same token-to-copy identity invariant as Save; explicit
+  Refresh resolves catalog changes without silently rewriting tokens.
+- Public preview cancellation stops subsequent HTTP requests, retries and expansion
+  and discards cancelled candidates instead of reporting completion.
+- Dark-surface headings and native checkbox captions are readable; stacked path
+  fields and a separate status row accommodate narrower windows.
 - Native Download usability now depends on validated Current After content;
   invalid historical Before content retains diagnostics without downgrading it.
 

@@ -63,7 +63,11 @@ use a fixture installation as well when testing.
    failures never claim a successful write or launch. Close also protects edits.
 
 Unknown active tokens remain visible and survive faithful saves. Turning off
-content-warning confirmation does not hide findings or bypass IO failures.
+content-warning confirmation does not hide findings or bypass IO failures. Launch
+also checks token-to-physical-copy identity when the editor is clean. If a newly
+acquired Workshop copy changes what a retained `_steam` token resolves to, Launch
+refuses rather than silently switching copies. **Refresh** explicitly reloads the
+game tokens against the current catalog without writing them.
 SteamCMD and native Steam-client actions are available through **Acquisition**,
 independently of the local editor. Native actions have controlled Linux/headless
 coverage, not live-account proof. Conflict analysis is not implemented and has no
@@ -104,6 +108,26 @@ Profile loads/imports are guarded during Reset, workflow questions and pending
 save/launch/refresh receipts. Profile file operations also keep the application
 open until their results are consumed. Cancelled questions and failed saves
 release their ownership so later operations remain available.
+
+### Confirmed acquisition batches and receipt capacity
+
+Public preview still resolves up to 10,000 items. **Previous batch** / **Next
+batch** show at most 20 candidates, their range and remaining count. Each operation
+requires a separate confirmation listing the exact captured IDs; pages never
+execute automatically, and navigation cannot change a confirmed/running request.
+Cancel during public preview stops subsequent lookups, retries and collection
+expansion after the current transport step (bounded by its 15-second deadline).
+Cancelled results are not published as completed candidates.
+
+Before confirmation and dispatch, the application counts the exact receipt inputs
+and reserves bounded result, pending-origin and resolution growth under the existing
+4 MiB atomic limit. Pathological metadata or carried evidence is refused **before
+backend effects**; explicitly preview fewer IDs instead. No SDK facts, outcomes,
+structured failure details or unresolved identities are truncated. Ordinary prose
+has encoded-byte budgets and visible omitted-byte accounting; native log drops
+retain their counts. Retry report write persists the exact captured receipt and
+never sends a new backend request. Historical cleanup uncertainty remains a hard
+gate after restart; filesystem recovery is not process-cleanup evidence.
 
 ### Native Steam-client actions
 

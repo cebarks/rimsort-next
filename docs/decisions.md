@@ -262,3 +262,29 @@ The design was revised before implementation:
   real lists and other event rates remain unmeasured. Isolated native screenshots
   expose low-contrast main section labels/default-width clipping for final review,
   not permission for unrelated cosmetic cleanup in this verification slice.
+- D63: the consolidated final correction keeps the 4 MiB atomic receipt cap and
+  10,000-item public preview. Each GUI operation explicitly captures at most 20
+  candidates, with previous/next controls and current/remaining counts. There is
+  no automatic next batch. Admission counts the exact known envelope, relevant
+  copies and all inherited unresolved origins, then reserves current results,
+  possible pending duplication and later acknowledgement/Inspect growth. It runs
+  before confirmation and again at dispatch. Cost: extra confirmations and
+  conservative rejection of pathological metadata/history, not hidden fact loss.
+  Strict native paths are at most4096 control-free UTF-8 bytes (at most twofold
+  JSON expansion), failure messages512; ordinary native logs retain the existing
+  256KiB/1000-line bound (at most sixfold JSON expansion). Ordinary diagnostic
+  messages cap at4096 encoded bytes, vectors at16KiB and preview diagnostics64KiB,
+  with visible omitted-byte accounting. Accepted SDK facts/detail/identities and
+  inherited original items/runs are never clipped. SteamCMD run-name randomness
+  is explicitly16 characters so its future path is bounded from the captured root.
+- D64: clean Launch reuses Save's representability validation before warning
+  confirmation or dispatch. Explicit Refresh is the supported token re-resolution
+  choice; never silently rewrite raw tokens, switch a retained copy or invent a
+  new applied baseline. Historical cleanup uncertainty protects both backends;
+  historical SteamCMD journal errors do not retarget recovery to another root.
+- D65: preview cancellation owns a fresh cooperative flag and checks between
+  requests, retries and expansions, retaining the finite current HTTP deadline.
+  Cancelled completion is discarded. Minimal dark-surface heading labels and
+  palette-backed standard checkboxes preserve native click/keyboard behavior;
+  stacked settings and a separate status row address narrow-window clipping.
+  Independent final scoped rereview remains coordinator-owned.

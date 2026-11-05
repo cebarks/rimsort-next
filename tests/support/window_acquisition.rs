@@ -1,4 +1,10 @@
 use super::*;
+#[path = "window_capacity.rs"]
+mod capacity;
+#[path = "window_preview_cancel.rs"]
+mod preview_cancel;
+#[path = "window_receipt_budget.rs"]
+pub(super) mod receipt_budget;
 use crate::integrations::workshop::WorkshopClient;
 use slint::Model;
 use std::{
@@ -675,10 +681,32 @@ fn collection_partial_outcomes_and_bounded_unverified_update() {
 }
 fn cleanup_failure_keeps_window_and_launch_blocked() {
     let (root, ws) = fixture();
+    struct ReleaseOnDrop(PathBuf, PathBuf);
+    impl Drop for ReleaseOnDrop {
+        fn drop(&mut self) {
+            let _ = fs::write(&self.0, "release test descendant");
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !self.1.exists() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+    }
+    let exited = root.path().join("descendant-exited");
+    let release = ReleaseOnDrop(root.path().join("release-descendant"), exited.clone());
+    let pid_path = root.path().join("descendant-pid");
+    let child = format!(
+        "import pathlib,time\np=pathlib.Path({:?})\nuntil=time.monotonic()+30\nwhile not p.exists() and time.monotonic()<until: time.sleep(0.01)\npathlib.Path({:?}).write_text('natural exit')\n",
+        release.0.to_string_lossy(),
+        exited.to_string_lossy()
+    );
     prepared(
         &ws,
         root.path(),
-        "import subprocess\nsubprocess.Popen(['/usr/bin/sleep','2'],start_new_session=True)",
+        &format!(
+            "import subprocess\np=subprocess.Popen(['/usr/bin/python3','-c',{:?}],start_new_session=True)\npathlib.Path({:?}).write_text(str(p.pid))",
+            child,
+            pid_path.to_string_lossy()
+        ),
         "3",
     );
     start(&ws);
@@ -700,6 +728,60 @@ fn cleanup_failure_keeps_window_and_launch_blocked() {
         w.invoke_retry_recovery();
     });
     assert!(ws.state.app.lock().unwrap().acquisition.launch_blocked());
+    let history = root.path().join("private/last-acquisition.json");
+    let original = fs::read(&history).unwrap();
+    let launched = root.path().join("unexpected-launch");
+    let game = root.path().join("RimWorldLinux64");
+    fs::write(
+        &game,
+        format!(
+            "#!/usr/bin/python3\nimport pathlib\npathlib.Path({:?}).write_text('launched')\n",
+            launched.to_string_lossy()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&game, fs::Permissions::from_mode(0o700)).unwrap();
+    let pid = fs::read_to_string(&pid_path).unwrap();
+    let process = fs::read_to_string(format!("/proc/{pid}/status")).unwrap();
+    assert!(
+        !process
+            .lines()
+            .any(|line| line.starts_with("State:") && line.contains("Z (zombie)"))
+    );
+    let next = reopen(&ws, root.path());
+    wait(&next, |w| {
+        w.installed() && w.with_acquisition(|a| !a.get_busy())
+    });
+    assert!(
+        std::path::Path::new(&format!("/proc/{pid}")).exists(),
+        "controlled descendant must still be alive through reopen"
+    );
+    assert!(!next.state.app.lock().unwrap().acquisition.recovery_needed);
+    assert!(
+        next.state.app.lock().unwrap().acquisition.launch_blocked(),
+        "filesystem recovery must not erase historical SteamCMD cleanup uncertainty"
+    );
+    next.with_acquisition(|w| {
+        w.invoke_acknowledge_native();
+        w.invoke_acquire();
+        assert!(w.get_question_token().is_empty());
+        w.invoke_retry_report();
+        w.invoke_retry_recovery();
+    });
+    next.with_window(|w| {
+        w.invoke_launch();
+        assert!(w.get_status().contains("refused"));
+        assert!(!w.get_busy_launch());
+        w.invoke_close_window();
+        assert!(w.window().is_visible());
+    });
+    assert!(!launched.exists());
+    assert_eq!(fs::read(history).unwrap(), original);
+    drop(release);
+    assert!(
+        exited.exists(),
+        "test-owned descendant must consume release before fixture removal"
+    );
 }
 
 fn late_close_answer_settles_without_another_worker_wakeup() {
@@ -1002,6 +1084,8 @@ pub(super) fn released_question_adopts_rules_immediately(late_keep_open: bool) -
 }
 
 pub(super) fn acquisition_callbacks() {
+    preview_cancel::cancellation_stops_http_and_next_preview_works();
+    capacity::capacity_refuses_before_either_backend_and_preserves_origins();
     completed_receipt_does_not_own_replacement_recovery(false);
     completed_receipt_does_not_own_replacement_recovery(true);
     rescan_preserves_selected_copy_and_raw_tokens();

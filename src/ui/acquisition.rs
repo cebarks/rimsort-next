@@ -12,7 +12,9 @@ use crate::{
         run_acquisition,
     },
     integrations::{
-        acquisition_state::{self as storage, FinalReport, Preferences, SteamClientPreferences},
+        acquisition_state::{
+            self as storage, FinalReport, Preferences, SteamClientPreferences, budget,
+        },
         install::Installer,
         scan::scan_install,
         steam_client::SteamClientConfig,
@@ -95,7 +97,8 @@ enum Message {
         String,
     ),
     NativePreferences(Result<SteamClientPreferences, String>),
-    Preview(Vec<WorkshopItem>, String),
+    Preview(Vec<WorkshopItem>, String, String),
+    PreviewCancelled,
     Preferences(Result<Preferences, String>),
     Recovery(Box<RecoveryReceipt>),
     Finished(Box<FinalReport>, Result<(), String>),
@@ -130,7 +133,9 @@ pub(super) struct AcquisitionState {
     native_selected: bool,
     native_action: Option<Action>,
     candidates: Vec<WorkshopItem>,
+    page: usize,
     preview: String,
+    preview_diagnostics: String,
     note: String,
     historical: Option<FinalReport>,
     final_report: Option<FinalReport>,
@@ -142,6 +147,10 @@ pub(super) struct AcquisitionState {
     notice: Arc<AtomicBool>,
 }
 impl AcquisitionState {
+    fn batch(&self) -> &[WorkshopItem] {
+        let start = (self.page * steam_protocol::MAX_ITEMS).min(self.candidates.len());
+        &self.candidates[start..(start + steam_protocol::MAX_ITEMS).min(self.candidates.len())]
+    }
     fn native_uncertain(&self) -> bool {
         self.final_report
             .as_ref()
@@ -159,8 +168,8 @@ impl AcquisitionState {
                     || r.report.recovery_required.is_some()
             })
             || self.historical.as_ref().is_some_and(|r| {
-                r.native.is_some()
-                    && (r.report.cleanup_error.is_some() || r.report.recovery_required.is_some())
+                r.report.cleanup_error.is_some()
+                    || (r.native.is_some() && r.report.recovery_required.is_some())
             })
     }
     pub(super) fn protected(&self) -> bool {
@@ -187,6 +196,21 @@ pub(super) fn register(state: &Arc<State>, window: &AcquisitionWindow) {
     window.on_save_preferences(move |path, timeout| preferences(&s, &path, &timeout));
     let s = state.clone();
     window.on_acquire(move || acquire(&s));
+    let s = state.clone();
+    window.on_change_page(move |direction| {
+        let mut app = s.app.lock().expect("state");
+        let a = &mut app.acquisition;
+        if !a.busy && !a.hard_protected() {
+            let last = a.candidates.len().saturating_sub(1) / steam_protocol::MAX_ITEMS;
+            a.page = if direction < 0 {
+                a.page.saturating_sub(1)
+            } else {
+                (a.page + 1).min(last)
+            };
+        }
+        drop(app);
+        paint_acquisition(&s);
+    });
     let s = state.clone();
     window.on_answer_question(move |token, answer| answer_question(&s, &token, &answer));
     let s = state.clone();
@@ -364,36 +388,34 @@ pub(super) fn preview(state: &Arc<State>, text: &str, client: Arc<WorkshopClient
             Err(e) => errors.push(format!("{token}: {e}")),
         }
     }
+    let cancel = {
+        let mut app = state.app.lock().expect("state");
+        app.acquisition.cancel = Arc::new(AtomicBool::new(false));
+        app.acquisition.candidates.clear();
+        app.acquisition.page = 0;
+        app.acquisition.preview.clear();
+        app.acquisition.preview_diagnostics.clear();
+        app.acquisition.cancel.clone()
+    };
     spawn(state, false, move |_, _, _| {
-        let preview = client.resolve(&ids);
+        let Some(preview) = client.resolve_cancellable(&ids, &cancel) else {
+            return Message::PreviewCancelled;
+        };
         errors.extend(
             preview
                 .diagnostics
                 .iter()
                 .map(|d| format!("{}: {}", d.item_id.get(), d.message)),
         );
-        errors.extend(
-            preview
-                .collections
-                .iter()
-                .map(|c| format!("Collection {}: {}", c.id.get(), c.title)),
-        );
-        let text = format!(
-            "Workshop candidates (not proof of package ID/installed copy):\n{}\nDiagnostics / collections:\n{}",
-            preview
-                .items
-                .iter()
-                .map(|i| format!(
-                    "{} — {} (upstream {:?})",
-                    i.id.get(),
-                    i.title,
-                    i.upstream_updated
-                ))
-                .collect::<Vec<_>>()
-                .join("\n"),
-            errors.join("\n")
-        );
-        Message::Preview(preview.items, text)
+        let diagnostics = budget::diagnostic(&errors.join("\n"), budget::PREVIEW_BYTES);
+        let collections = preview
+            .collections
+            .iter()
+            .map(|c| format!("Collection {}: {}", c.id.get(), c.title))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let text = format!("{diagnostics}\n{collections}");
+        Message::Preview(preview.items, text, diagnostics)
     });
 }
 fn preferences(state: &Arc<State>, path: &str, timeout: &str) {
@@ -453,6 +475,7 @@ fn acquire(state: &Arc<State>) {
         if a.candidates.is_empty() {
             return Err("Resolve public item candidates first".into());
         }
+        let candidates = a.batch().to_vec();
         let (request, executable, timeout_seconds, native) = if a.native_selected {
             if cfg!(windows) {
                 return Err(
@@ -493,7 +516,8 @@ fn acquire(state: &Arc<State>) {
                 .ok_or("Save valid acquisition preferences first")?;
             let config = SteamCmdConfig {
                 executable: p.executable.clone(),
-                workspace: root.join("acquisition-workspace"),
+                workspace: std::path::absolute(root.join("acquisition-workspace"))
+                    .map_err(|e| e.to_string())?,
                 mods_root: mods_root.clone(),
                 target_version: session.target_version().clone(),
                 batch_timeout: Duration::from_secs(p.timeout_seconds),
@@ -501,7 +525,7 @@ fn acquire(state: &Arc<State>) {
             (
                 WorkerRequest::SteamCmd(AcquisitionRequest {
                     config,
-                    items: a.candidates.clone(),
+                    items: candidates.clone(),
                 }),
                 p.executable.clone(),
                 p.timeout_seconds,
@@ -530,21 +554,29 @@ fn acquire(state: &Arc<State>) {
             target_version: session.target_version().to_string(),
             requested_at: now(),
             returned_at: None,
-            candidates: a.candidates.clone(),
-            preview_diagnostics: a.preview.clone(),
+            candidates: candidates.clone(),
+            preview_diagnostics: a.preview_diagnostics.clone(),
             report: AcquisitionReport {
                 items: a
                     .final_report
                     .as_ref()
                     .or(a.historical.as_ref())
                     .filter(|r| r.mods_root == mods_root)
-                    .map(|r| r.report.items.clone())
+                    .map(|r| {
+                        r.report
+                            .items
+                            .iter()
+                            .filter(|i| candidates.iter().any(|c| c.id == i.item_id))
+                            .cloned()
+                            .collect()
+                    })
                     .unwrap_or_default(),
                 ..AcquisitionReport::default()
             },
             error: None,
             native,
         };
+        receipt_capacity(&request, &report)?;
         Ok((request, report))
     })();
     match result {
@@ -561,6 +593,13 @@ fn acquire(state: &Arc<State>) {
     }
     drop(app);
     paint_acquisition(state);
+}
+fn receipt_capacity(request: &WorkerRequest, report: &FinalReport) -> Result<(), String> {
+    let workspace = match request {
+        WorkerRequest::SteamCmd(r) => Some(r.config.workspace.as_path()),
+        WorkerRequest::Native(_) => None,
+    };
+    budget::check(report, workspace)
 }
 fn answer_question(state: &Arc<State>, token: &str, answer: &str) {
     if !matches!(answer, "confirm" | "cancel") {
@@ -604,6 +643,12 @@ fn answer_question(state: &Arc<State>, token: &str, answer: &str) {
     let Some((request, report)) = question.request else {
         return;
     };
+    if let Err(error) = receipt_capacity(&request, &report) {
+        app.acquisition.note = error;
+        drop(app);
+        paint_acquisition(state);
+        return;
+    }
     app.acquisition.cancel = Arc::new(AtomicBool::new(false));
     let cancel = app.acquisition.cancel.clone();
     let path = app
@@ -690,6 +735,7 @@ fn run_worker(
     report.returned_at = now();
     report.report.logs_truncated |= inbox.lock().expect("inbox").progress.truncated;
     report.report.logs.clear();
+    budget::finish_diagnostics(&mut report);
     let result = storage::write(path, &report);
     Message::Finished(Box::new(report), result)
 }
@@ -733,6 +779,7 @@ pub(super) fn recover(state: &Arc<State>) {
         let result = recover_root(settings, basis, receipt.as_mut());
         let persistence = if let Some(report) = receipt.as_mut() {
             report.report.recovery_required = result.as_ref().err().cloned();
+            budget::finish_diagnostics(report);
             report_path
                 .as_ref()
                 .ok_or_else(|| "Report path unavailable".into())
@@ -890,9 +937,20 @@ pub(super) fn deliver(state: &Arc<State>) {
                 app.acquisition.historical = h.map(|report| *report);
                 app.acquisition.note = n;
             }
-            Message::Preview(items, text) => {
+            Message::PreviewCancelled => {
+                app.acquisition.note =
+                    "Public preview cancelled; no completed candidates. Preview again explicitly."
+                        .into();
+            }
+            Message::Preview(_, _, _) if app.acquisition.cancel.load(Ordering::Relaxed) => {
+                app.acquisition.note =
+                    "Public preview cancelled; no completed candidates. Preview again explicitly."
+                        .into();
+            }
+            Message::Preview(items, text, diagnostics) => {
                 app.acquisition.candidates = items;
                 app.acquisition.preview = text;
+                app.acquisition.preview_diagnostics = diagnostics;
                 app.acquisition.note =
                     "Public preview complete; diagnostics are not successful downloads".into();
             }
@@ -1012,7 +1070,12 @@ pub(super) fn paint_acquisition(state: &Arc<State>) {
     w.set_busy(a.busy);
     w.set_library_changed(a.library_changed);
     w.set_status(a.note.as_str().into());
-    w.set_preview_text(a.preview.as_str().into());
+    let start = a.page * steam_protocol::MAX_ITEMS;
+    let end = start + a.batch().len();
+    w.set_page_status(format!("Current batch {}–{} of {} candidates; {} remaining after this page. Each batch requires a new confirmation.", if a.candidates.is_empty() { 0 } else { start + 1 }, end, a.candidates.len(), a.candidates.len().saturating_sub(end)).into());
+    w.set_can_previous(!a.busy && !a.hard_protected() && a.page > 0);
+    w.set_can_next(!a.busy && !a.hard_protected() && end < a.candidates.len());
+    w.set_preview_text(format!("Workshop candidates (not proof of package ID/installed copy):\n{}\nDiagnostics / collections:\n{}", a.batch().iter().map(|i| format!("{} — {} (upstream {:?})", i.id.get(), i.title, i.upstream_updated)).collect::<Vec<_>>().join("\n"), a.preview).into());
     if let Some(p) = &a.preferences {
         w.set_executable(p.executable.to_string_lossy().as_ref().into());
         w.set_timeout_seconds(p.timeout_seconds.to_string().into());

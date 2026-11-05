@@ -169,6 +169,7 @@ fn global_expansion_limit_does_not_allocate_one_error_per_unvisited_edge() {
     let client = WorkshopClient::at("http://127.0.0.1:1");
     let mut resolution = Resolution {
         client: &client,
+        cancel: &AtomicBool::new(false),
         preview: WorkshopPreview::default(),
         cache: HashMap::new(),
         visited: HashSet::new(),

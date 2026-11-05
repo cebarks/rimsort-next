@@ -90,22 +90,30 @@ pub(super) fn acknowledge(state: &Arc<State>, mut app: std::sync::MutexGuard<'_,
     if app.acquisition.busy || app.acquisition.hard_protected() || !reset_context_allowed(&app) {
         return;
     }
-    if app.acquisition.final_report.is_none() {
-        app.acquisition.final_report = app.acquisition.historical.take();
-    }
-    if let Some(native) = app
+    let Some(mut report) = app
         .acquisition
         .final_report
-        .as_mut()
-        .and_then(|r| r.native.as_mut())
-    {
+        .as_ref()
+        .or(app.acquisition.historical.as_ref())
+        .cloned()
+    else {
+        return;
+    };
+    if let Some(native) = report.native.as_mut() {
         for pending in &mut native.pending {
             if pending.resolved_by.is_none() {
-                pending.resolved_by =
-                    Some("Explicit user acknowledgement; effects not reversed".into());
+                pending.resolved_by = Some(budget::ACKNOWLEDGEMENT.into());
             }
         }
     }
+    if let Err(error) = budget::check_stored(&report) {
+        app.acquisition.note = error;
+        drop(app);
+        paint_acquisition(state);
+        return;
+    }
+    app.acquisition.final_report = Some(report);
+    app.acquisition.historical = None;
     app.acquisition.persisted = false;
     drop(app);
     retry_report(state);
@@ -117,13 +125,19 @@ pub(super) fn question(report: &FinalReport) -> String {
         .map(|n| action_word(n.action))
         .unwrap_or("download");
     format!(
-        "{:?}: {action}\nExecutable: {}\nCaptured Mods recovery root (not native install destination): {}\nTarget: {}; deadline: {} seconds; {} candidates.\n{}",
+        "{:?}: {action}\nExecutable: {}\nCaptured Mods recovery root (not native install destination): {}\nTarget: {}; deadline: {} seconds; {} candidates.\nCaptured IDs: {}\n{}",
         report.backend,
         report.executable.display(),
         report.mods_root.display(),
         report.target_version,
         report.timeout_seconds,
         report.candidates.len(),
+        report
+            .candidates
+            .iter()
+            .map(|i| i.id.get().to_string())
+            .collect::<Vec<_>>()
+            .join(", "),
         if action == "unsubscribe" {
             "WARNING: Unsubscribe removes Workshop subscriptions. It does not prove installed files were removed and cannot be undone by cancellation.\n"
         } else {
@@ -291,6 +305,7 @@ pub(super) fn run_worker(
     }
     retain_other_copies(&mut report, &previous);
     report.returned_at = now();
+    budget::finish_diagnostics(&mut report);
     let persisted = storage::write(path, &report);
     Message::Finished(Box::new(report), persisted)
 }

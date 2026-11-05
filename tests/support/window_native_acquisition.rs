@@ -34,7 +34,8 @@ for i in r['ids']:
  install=dict(path=str(root/'native-copy'),size_bytes=9,timestamp=7,freshness='unknown') if r['action']=='inspect' else None
  for phase in ['before','after']:
   emit(dict(kind='observation',item_id=i,phase=phase,facts=dict(subscription='unknown',install=install)))
- emit(dict(kind='outcome',item_id=i,outcome='observed' if r['action']=='inspect' else 'acknowledged',detail=None))
+ outcome = {{'inspect':'observed','download':'unknown','subscribe':'acknowledged','unsubscribe':'acknowledged'}}[r['action']]
+ emit(dict(kind='outcome',item_id=i,outcome=outcome,detail=dict(stage='complete',kind='timed_out',message='Download pending') if r['action']=='download' else None))
 emit(dict(kind='terminal'))
 "#)).unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
@@ -376,7 +377,141 @@ sys.exit(0)
     });
 }
 
+fn clean_qualified_token_requires_explicit_refresh_before_launch() {
+    let (root, initial) = fixture();
+    let local = root.path().join("Mods/local/About");
+    fs::create_dir_all(&local).unwrap();
+    fs::write(
+        local.join("About.xml"),
+        "<ModMetaData><packageId>fixture.native</packageId></ModMetaData>",
+    )
+    .unwrap();
+    let workshop = root.path().join("Workshop");
+    fs::create_dir(&workshop).unwrap();
+    initial
+        .state
+        .app
+        .lock()
+        .unwrap()
+        .target
+        .settings
+        .workshop_root = Some(workshop);
+    let config = root.path().join("ModsConfig.xml");
+    fs::write(
+        &config,
+        "<ModsConfigData><activeMods><li> FiXtUrE.NaTiVe_steam </li></activeMods></ModsConfigData>",
+    )
+    .unwrap();
+    let bytes = fs::read(&config).unwrap();
+    let launched = root.path().join("game-launched");
+    let game = root.path().join("RimWorldLinux64");
+    fs::write(
+        &game,
+        format!(
+            "#!/usr/bin/python3\nimport pathlib\npathlib.Path({:?}).write_text('launched')\n",
+            launched.to_string_lossy()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&game, fs::Permissions::from_mode(0o700)).unwrap();
+    let ws = super::acquisition_tests::reopen(&initial, root.path());
+    wait(&ws, |w| {
+        w.installed() && w.with_acquisition(|a| !a.get_busy())
+    });
+    let before = ws
+        .state
+        .app
+        .lock()
+        .unwrap()
+        .session
+        .as_ref()
+        .unwrap()
+        .working_entries()
+        .to_vec();
+    assert_eq!(
+        before[0].mod_id().unwrap().as_path(),
+        local.parent().unwrap()
+    );
+    assert!(!ws.with_window(|w| w.get_dirty()));
+    let exe = helper(
+        root.path(),
+        r#"
+p=root/'Workshop/42/About'
+p.mkdir(parents=True)
+(p/'About.xml').write_text('<ModMetaData><packageId>fixture.native</packageId></ModMetaData>')
+for phase in ['before','after']:
+ emit(dict(kind='observation',item_id=42,phase=phase,facts=dict(subscription='subscribed',install=dict(path=str(p.parent),size_bytes=1,timestamp=7,freshness='current'))))
+emit(dict(kind='outcome',item_id=42,outcome='installed',detail=None))
+emit(dict(kind='terminal'))
+sys.exit(0)
+"#,
+    );
+    configure(&ws, &exe);
+    preview(&ws, &[42]);
+    start(&ws, "download");
+    wait(&ws, |w| w.with_acquisition(|a| !a.get_busy()));
+    ws.with_acquisition(|w| w.invoke_rescan());
+    wait(&ws, |w| w.with_acquisition(|a| !a.get_busy()));
+    assert_eq!(
+        ws.state
+            .app
+            .lock()
+            .unwrap()
+            .session
+            .as_ref()
+            .unwrap()
+            .working_entries(),
+        before
+    );
+    assert!(!ws.with_window(|w| w.get_dirty()));
+    for warnings in [false, true] {
+        ws.with_window(|w| {
+            w.invoke_toggle_warnings(warnings);
+            w.invoke_launch();
+            assert!(
+                !w.get_busy_launch(),
+                "clean token/copy mismatch must refuse before spawn"
+            );
+            assert!(
+                !w.get_prompt_open(),
+                "content confirmation cannot resolve identity"
+            );
+            assert!(w.get_status().contains("Refresh"), "{}", w.get_status());
+        });
+    }
+    ws.with_window(|w| w.invoke_toggle_warnings(false));
+    assert!(!launched.exists());
+    assert_eq!(fs::read(&config).unwrap(), bytes);
+    ws.with_window(|w| w.invoke_refresh_from_form());
+    wait(&ws, |w| {
+        !w.with_window(|a| a.get_busy_refresh()) && w.with_acquisition(|a| !a.get_busy())
+    });
+    assert_eq!(
+        ws.state
+            .app
+            .lock()
+            .unwrap()
+            .session
+            .as_ref()
+            .unwrap()
+            .working_entries()[0]
+            .mod_id()
+            .unwrap()
+            .as_path(),
+        root.path().join("Workshop/42")
+    );
+    assert!(!ws.with_window(|w| w.get_dirty()));
+    ws.with_window(|w| w.invoke_launch());
+    wait(&ws, |w| {
+        launched.exists() && !w.with_window(|a| a.get_busy_launch())
+    });
+    wait(&ws, |w| !w.state.host.known_game_running().unwrap());
+    assert_eq!(fs::read(config).unwrap(), bytes);
+}
+
 pub(super) fn native_callbacks() {
+    clean_qualified_token_requires_explicit_refresh_before_launch();
+    super::acquisition_tests::receipt_budget::large_preview_confirms_only_current_batch();
     useful_path();
     rescan_preserves_active_copy_and_tokens();
     restart_uncertainty_and_covering_inspect();
