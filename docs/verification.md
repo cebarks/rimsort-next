@@ -8,6 +8,14 @@ behavior remain separate proof categories. The Task6 change tree based on
 subsequent consolidated final-fix wave has separate current evidence below;
 historical gates are not claims about changed source or untested environments.
 
+## Current platform scope
+
+Active delivery and required hosted CI cover **Linux and Windows**. macOS
+implementation and policy tests are retained, but macOS development, validation
+and artifacts are deferred pending direct development on macOS hardware. Its
+unresolved failures below are not fixed or reclassified as success by this scope
+change. Platform-policy tests running on another OS are not macOS runtime proof.
+
 ## Reproduce automated checks
 
 From an isolated checkout, with Rust stable, just, and native dependencies in
@@ -93,10 +101,25 @@ an interpreter dependency, not proof of the earlier macOS timeout's exact cause.
 CI uses `--no-fail-fast` to continue remaining test targets after individual test
 failures. Those failures still fail the job and block release/archive steps.
 
-A new hosted matrix is required for these fixture changes. Successful Windows
-root probes can be retained with the installer unit group's `--nocapture` option.
-Windows acquisition remains disabled; fixture/build/archive success does not
-establish real SDK/account or native GUI behavior.
+Candidate `9dd5a94` ([run 42137816783](https://github.com/cebarks/rimsort-next/actions/runs/42137816783))
+passed complete Linux and Windows jobs, including strict Clippy, tests, release
+builds, packaging and archive upload. Linux reported 632 passed / 0 failed / 1
+ignored; Windows reported 567 / 0 / 1, each across 47 test-result groups. These
+are controlled fixture/build results, not native Windows GUI or live-account
+proof. The overall three-target run still failed: macOS reported 609 / 3 / 1,
+and its release/archive steps did not run.
+
+The deferred macOS failures remain in `native_failures` (Python failure fixture
+reaches its one-second deadline), `window_form` (Home is not caret-to-start on
+Apple), and `window_lifecycle` (a plain executable is not the required macOS app
+bundle). No further macOS-specific fixture corrections are included in the scope
+change. The compiled native-acquisition fixture's seven cases did pass on macOS;
+that narrower result is not a successful macOS suite or delivery claim.
+
+A fresh exact-commit Linux/Windows matrix is required after narrowing the workflow.
+Successful Windows root probes can be retained with the installer unit group's
+`--nocapture` option. Windows acquisition remains disabled; fixture/build/archive
+success does not establish real SDK/account or native GUI behavior.
 
 ## Combined daily-driver scenario
 

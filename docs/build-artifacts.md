@@ -1,7 +1,7 @@
 # RimSort Next development build artifacts
 
-This describes the preserved `.github/workflows/ci.yml` matrix and artifact
-format, not a claim that hosted CI ran. Current local evidence is in
+This describes the current Linux/Windows `.github/workflows/ci.yml` matrix and
+artifact format. Actual hosted results and their limits are recorded in
 [verification](verification.md). CI tests/lints the workspace, but its release
 archive command builds only the default main package. Task6 additionally compiles
 `cargo build --locked --workspace --release` locally; that does not change the
@@ -17,7 +17,6 @@ archive; unpack both layers before running the executable.
 | --- | --- | --- |
 | Ubuntu 24.04 | x86_64-unknown-linux-gnu | .tar.gz |
 | Windows Server 2022 (MSVC) | x86_64-pc-windows-msvc | .zip |
-| macOS 15 (Apple Silicon) | aarch64-apple-darwin | .tar.gz |
 
 Each inner archive has one top-level directory named
 `rimsort-rust-<target>-<commit-sha>`, containing `rimsort-rust` (or
@@ -35,11 +34,15 @@ supported by this artifact. Use `ldd ./rimsort-rust` to diagnose missing shared
 libraries; distribution package names vary. Qt is not required by the currently
 locked Slint defaults.
 
-Windows and macOS downloads are not signed or notarized and may be blocked or
-warned about by operating-system security controls. Only run builds from a commit
-and workflow you trust; these archives do not establish publisher identity.
-Windows may require the Microsoft Visual C++ runtime. macOS artifacts are raw
-Apple Silicon executables, not .app bundles; Intel Macs are not covered.
+Windows downloads are not signed and may be blocked or warned about by
+operating-system security controls. Only run builds from a commit and workflow
+you trust; these archives do not establish publisher identity. Windows may
+require the Microsoft Visual C++ runtime.
+
+macOS development, validation and artifacts are deferred pending direct macOS
+hardware work. The implementation is retained, but the current workflow does not
+test, build or upload a macOS artifact. Removing its target is not evidence that
+the prior failures were fixed; see the verification record.
 
 ## Limitations
 

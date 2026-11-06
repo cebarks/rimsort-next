@@ -42,6 +42,9 @@
 
 ### Verification and limitations
 
+- Active CI and development-artifact scope is Linux and Windows. macOS
+  development and validation are deferred pending direct macOS hardware work;
+  existing implementation and unresolved failure evidence are retained.
 - Linux CI Clippy/tests omit dev/test debug information, use a separate check-cache
   namespace and report bounded disk/inode/memory/check-target size snapshots.
   Release settings are unchanged; this trades CI source-level debug information

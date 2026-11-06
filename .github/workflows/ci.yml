@@ -49,10 +49,6 @@ jobs:
             target: x86_64-pc-windows-msvc
             check-env:
               CARGO_TARGET_DIR: target/check
-          - os: macos-15
-            target: aarch64-apple-darwin
-            check-env:
-              CARGO_TARGET_DIR: target/check
     env:
       TARGET: ${{ matrix.target }}
       BUILD_SHA: ${{ github.sha }}

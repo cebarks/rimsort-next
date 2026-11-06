@@ -7,6 +7,11 @@ graphical and externally unverified behavior; [final review](docs/reviews/final-
 is pending. See [source provenance](docs/provenance.md) and the inherited GPL
 [license](LICENSE.md). The Cargo package/executable remains `rimsort-rust`.
 
+Current delivery scope is **Linux and Windows**. macOS development, validation and
+build artifacts are deferred pending direct development on macOS hardware. Its
+implementation is retained, but it is not part of the current CI matrix or a
+validated delivery target; see [platform verification](docs/verification.md).
+
 ## Prerequisites
 
 Install [Rust stable](https://rustup.rs/) with the `rustfmt` and `clippy`
@@ -14,8 +19,7 @@ components. [just](https://just.systems/) provides convenient local task command
 Cargo can also be used directly.
 
 Native builds need a platform compiler/linker: Visual Studio Build Tools with
-Desktop development with C++ on Windows, Xcode Command Line Tools on macOS, and
-build essentials on Linux. On Ubuntu:
+Desktop development with C++ on Windows and build essentials on Linux. On Ubuntu:
 
 ```sh
 sudo apt-get update
@@ -297,13 +301,14 @@ The **Rust CI** GitHub Actions workflow runs on pull requests, pushes to
 `main`, and manual dispatch. These build checks are not a release workflow.
 
 Formatting runs once on Linux. Clippy, tests, and native release builds run on
-Ubuntu 24.04 x86_64, Windows Server 2022 x86_64/MSVC, and macOS 15 Apple Silicon.
+Ubuntu 24.04 x86_64 and Windows Server 2022 x86_64/MSVC. macOS is deferred and has
+no current CI build or downloadable artifact.
 Actions are pinned to commit SHAs, tokens are read-only, checkout does not persist
 credentials, and PRs do not save dependency caches. Superseded runs are cancelled.
 
 To download a build, open **Actions → Rust CI → a successful run → Artifacts** and
 select the target-labelled artifact. Artifacts are retained for 14 days. Each
-contains a `.tar.gz` archive (Linux/macOS) or `.zip` archive (Windows) with the
+contains a `.tar.gz` archive (Linux) or `.zip` archive (Windows) with the
 executable, license, and build metadata/runtime notes. Unpack the downloaded
 artifact ZIP, then the inner platform archive.
 

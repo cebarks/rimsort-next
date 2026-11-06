@@ -7,6 +7,10 @@ rereview accepted the controlled Linux scope for
 See [verification](verification.md) for current commands and proof categories,
 and [parity](parity.md) for inherited metadata detail.
 
+Active delivery scope is **Linux and Windows**. macOS development and validation
+are deferred; its implementation and historical failure evidence are retained,
+not treated as fixed or validated by removing the CI target.
+
 | Capability | Implementation and automated evidence | Boundary |
 | --- | --- | --- |
 | Offline isolated startup | `startup`, `settings`, native main | `--help` alone is not window proof; configured game paths need separate isolation |
@@ -22,14 +26,17 @@ and [parity](parity.md) for inherited metadata detail.
 | Close with late accepted effects | Worker/lifecycle fixtures and combined daily-driver | Cleanup and atomic receipt precede hide; test-owned harmless game survives; external Steam effects not undone |
 | Main/helper separation | Locked main build/compiler IDs, normal dependency tree, ELF and default member checks | Pure protocol in main; helper separately needs SDK runtime; no runtime asset distribution |
 | Native window | Isolated Xvfb/software Slint smoke recorded in verification | Startup and explicitly exercised fixture actions only, not full graphical interaction coverage |
-| Platform builds | Existing Linux/Windows/macOS CI matrix preserved | Local Linux commands do not attest hosted CI or other-platform runtime |
+| Platform builds | Linux/Windows CI matrix; see actual hosted results in verification | macOS deferred; build/fixture success is not native GUI, live-account or universal runtime proof |
 
 ## Explicit exclusions and externally unverified boundaries
 
-- Windows acquisition fails before spawn (D50); offline Windows features remain
-  enabled but were not executed by this Linux verification.
-- macOS runtime, real Steam SDK initialization, account/subscription/download
-  operations and compatibility with real game installations remain unverified.
+- Windows acquisition fails before spawn (D50). Hosted Windows fixtures and
+  build archives have separate evidence from the original Linux verification;
+  neither establishes native Windows GUI or real-game/account behavior.
+- macOS development, validation and delivery are deferred, with unresolved
+  fixture failures documented in verification. Real Steam SDK initialization,
+  account/subscription/download operations and real-game compatibility remain
+  unverified.
 - No account credentials, valid real helper request, real SteamCMD download or
   owner game/config/mod mutation is part of Task6. Controlled fake helpers are
   not a substitute for later user-authorized live verification.
