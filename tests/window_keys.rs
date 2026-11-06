@@ -148,7 +148,12 @@ fn await_until(
     if done.get() || ready(ws) {
         return Ok(());
     }
-    Err(format!("{phase}: never reached; status {:?}", ws.status()))
+    let (busy, acquisition_status) =
+        ws.with_acquisition(|window| (window.get_busy(), window.get_status().to_string()));
+    Err(format!(
+        "{phase}: never reached; status {:?}; acquisition busy={busy}, status={acquisition_status:?}",
+        ws.status()
+    ))
 }
 
 /// One event on the window's own queue: Slint, not the test, decides who sees it.
@@ -260,12 +265,36 @@ fn keys_of(ws: &Workspace, property: &str) -> Vec<String> {
     })
 }
 
+fn startup_recovered(ws: &Workspace, phase: &str) -> Result<(), String> {
+    await_until(
+        phase,
+        ws,
+        Rc::new(|ws| ws.with_acquisition(|window| !window.get_busy())),
+    )?;
+    let (status, question) = ws.with_acquisition(|window| {
+        (
+            window.get_status().to_string(),
+            window.get_question_token().to_string(),
+        )
+    });
+    if !status.is_empty() || !question.is_empty() {
+        return Err(format!(
+            "{phase}: startup recovery did not succeed: {status:?}, question={question:?}"
+        ));
+    }
+    if !ws.with_window(|window| window.get_reset_enabled()) {
+        return Err(format!("{phase}: startup still protects list operations"));
+    }
+    Ok(())
+}
+
 fn install(fixture: &Fixture, phase: &str) -> Workspace {
     let ws = Workspace::open(&fixture.startup()).expect("the window must open");
     ws.show().expect("the window must be shown");
     ws.begin();
     await_until(phase, &ws, Rc::new(|ws: &Workspace| ws.installed()))
         .unwrap_or_else(|why| panic!("{why}"));
+    startup_recovered(&ws, phase).unwrap_or_else(|why| panic!("{why}"));
     ws
 }
 
@@ -586,4 +615,23 @@ fn keys_reach_the_focused_pane_and_nothing_else() {
     )
     .expect("and it can still be answered normally");
     std::mem::drop(ws);
+
+    let broken = Fixture::new(false);
+    fs::write(
+        broken.temp.path().join(".rimsort-next-Local Mods"),
+        b"not a management directory",
+    )
+    .expect("the owned malformed management entry must be created");
+    let ws = Workspace::open(&broken.startup()).expect("the broken fixture still opens");
+    ws.show().expect("the window must be shown");
+    ws.begin();
+    await_until(
+        "broken startup installed",
+        &ws,
+        Rc::new(|ws| ws.installed()),
+    )
+    .expect("the session can install before root recovery fails");
+    let error = startup_recovered(&ws, "broken startup recovery")
+        .expect_err("idle recovery with a terminal error is not fixture readiness");
+    assert!(error.contains("Recovery required:"), "{error}");
 }

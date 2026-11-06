@@ -1,7 +1,10 @@
 //! Real strict adapter and controlled executables only; no real helper is invoked.
 #![cfg(unix)]
+#[path = "support/native_acquisition.rs"]
+mod fixture;
 #[path = "support/trusted_temp.rs"]
 mod trusted_temp;
+use fixture::{Plan, helper};
 use rimsort_rust::{
     application::native_acquisition::{self, NativeReport},
     domain::types::GameVersion,
@@ -10,32 +13,61 @@ use rimsort_rust::{
         steam_client::SteamClientConfig,
     },
 };
+use serde_json::{Value, json};
 use std::{
     fs,
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::atomic::AtomicBool,
     time::Duration,
 };
 use steam_protocol::Action;
 
-fn helper(root: &Path, mode: &str) -> PathBuf {
-    let exe = root.join("fake-native");
-    fs::write(&exe, format!(r#"#!/usr/bin/python3
-import pathlib,json,sys
-root=pathlib.Path(__file__).parent
-r=json.load(sys.stdin)
-with (root/'requests').open('a') as f: f.write(json.dumps(r)+'\n')
-def emit(p):
- print('RIMSORT_STEAM_V1 '+json.dumps(dict(schema=1,app_id=294100,request_id=r['request_id'],payload=p)),flush=True)
-{mode}
-"#)).unwrap();
-    fs::set_permissions(&exe, fs::Permissions::from_mode(0o700)).unwrap();
-    exe
+fn item_payloads(
+    item_id: u64,
+    subscription: &str,
+    before: Value,
+    after: Value,
+    outcome: &str,
+) -> Vec<Value> {
+    let mut payloads = Vec::new();
+    for (phase, install) in [("before", before), ("after", after)] {
+        payloads.push(json!({
+            "kind": "observation", "item_id": item_id, "phase": phase,
+            "facts": {"subscription": subscription, "install": install},
+        }));
+    }
+    let detail = if outcome == "unknown" {
+        json!({"stage": "complete", "kind": "timed_out", "message": "Download pending"})
+    } else {
+        Value::Null
+    };
+    payloads.push(json!({
+        "kind": "outcome", "item_id": item_id, "outcome": outcome, "detail": detail,
+    }));
+    payloads
 }
+
+fn complete_plan(
+    request_id: &str,
+    action: Action,
+    ids: &[u64],
+    subscription: &str,
+    outcome: &str,
+) -> Plan {
+    let payloads = ids
+        .iter()
+        .flat_map(|&id| item_payloads(id, subscription, Value::Null, Value::Null, outcome))
+        .collect();
+    Plan::new(request_id, action, ids, payloads)
+}
+
+fn install(path: &Path, freshness: &str) -> Value {
+    json!({"path": path, "size_bytes": 1, "timestamp": 7, "freshness": freshness})
+}
+
 fn run(
     root: &Path,
-    mode: &str,
+    plans: &[Plan],
     ids: &[u64],
     action: Action,
 ) -> (
@@ -44,7 +76,7 @@ fn run(
     Option<String>,
 ) {
     let config = SteamClientConfig {
-        helper_path: helper(root, mode),
+        helper_path: helper(root, plans),
         runtime_dir: None,
         total_deadline: Duration::from_secs(2),
     };
@@ -60,14 +92,6 @@ fn run(
     );
     (receipt, report, error)
 }
-const COMPLETE: &str = r#"
-for i in r['ids']:
- for phase in ['before','after']:
-  emit(dict(kind='observation',item_id=i,phase=phase,facts=dict(subscription='unknown',install=None)))
- outcome = {'inspect':'observed','download':'unknown','subscribe':'acknowledged','unsubscribe':'acknowledged'}[r['action']]
- emit(dict(kind='outcome',item_id=i,outcome=outcome,detail=dict(stage='complete',kind='timed_out',message='Download pending') if r['action']=='download' else None))
-emit(dict(kind='terminal'))
-"#;
 #[test]
 fn native_preferences_are_independent_bounded_and_round_trip() {
     let root = tempfile::tempdir().unwrap();
@@ -115,9 +139,34 @@ fn native_preferences_are_independent_bounded_and_round_trip() {
     }
 }
 #[test]
+fn controlled_fixture_rejects_unplanned_request() {
+    let root = tempfile::tempdir().unwrap();
+    let plan = complete_plan("fixture-0", Action::Inspect, &[42], "unknown", "observed");
+    let (native, _, error) = run(root.path(), &[plan], &[43], Action::Inspect);
+    assert!(
+        error.is_some(),
+        "unplanned item accepted: {:?}",
+        native.runs
+    );
+    assert_eq!(native.runs[0].status, "ProcessFailed");
+    assert!(!native.runs[0].protocol_complete);
+    assert!(native.items[0].outcome.is_none());
+    let request: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.path().join("requests")).unwrap()).unwrap();
+    assert_eq!(request["ids"], serde_json::json!([43]));
+}
+
+#[test]
 fn acknowledgement_with_unknown_observation_is_not_subscribed_and_requires_review() {
     let root = tempfile::tempdir().unwrap();
-    let (native, report, error) = run(root.path(), COMPLETE, &[42], Action::Subscribe);
+    let plan = complete_plan(
+        "fixture-0",
+        Action::Subscribe,
+        &[42],
+        "unknown",
+        "acknowledged",
+    );
+    let (native, report, error) = run(root.path(), &[plan], &[42], Action::Subscribe);
     assert!(error.is_none());
     assert!(native.items[0].acknowledgement);
     assert_eq!(
@@ -132,13 +181,23 @@ fn acknowledgement_with_unknown_observation_is_not_subscribed_and_requires_revie
 #[test]
 fn batching_keeps_an_operation_wide_diagnostic_budget() {
     let root = tempfile::tempdir().unwrap();
-    let mode = format!("for _ in range(900): print('x'*400)\n{COMPLETE}");
-    let (native, _, error) = run(
-        root.path(),
-        &mode,
-        &(1..=41).collect::<Vec<_>>(),
-        Action::Inspect,
-    );
+    let ids: Vec<_> = (1..=41).collect();
+    let plans: Vec<_> = ids
+        .chunks(20)
+        .enumerate()
+        .map(|(index, batch)| {
+            let mut plan = complete_plan(
+                &format!("fixture-{index}"),
+                Action::Inspect,
+                batch,
+                "unknown",
+                "observed",
+            );
+            plan.diagnostic_lines = 900;
+            plan
+        })
+        .collect();
+    let (native, _, error) = run(root.path(), &plans, &ids, Action::Inspect);
     assert!(error.is_none(), "{error:?}");
     assert_eq!(native.runs.len(), 3);
     assert!(native.diagnostics.len() <= 1000);
@@ -167,23 +226,37 @@ fn batching_keeps_an_operation_wide_diagnostic_budget() {
 #[test]
 fn inspect_must_cover_download_freshness_not_just_subscription() {
     let root = trusted_temp::tempdir();
-    let failed = r#"
-for phase in ['before','after']:
- emit(dict(kind='observation',item_id=42,phase=phase,facts=dict(subscription='subscribed',install=None)))
-emit(dict(kind='outcome',item_id=42,outcome='unknown',detail=dict(stage='complete',kind='timed_out',message='Download pending')))
-emit(dict(kind='terminal'))
-"#;
-    let (original, _, _) = run(root.path(), failed, &[42], Action::Download);
+    let failed = complete_plan(
+        "fixture-0",
+        Action::Download,
+        &[42],
+        "subscribed",
+        "unknown",
+    );
+    let (original, _, error) = run(root.path(), &[failed], &[42], Action::Download);
+    assert!(error.is_none(), "error={error:?} runs={:?}", original.runs);
+    assert_eq!(
+        original.items[0].outcome,
+        Some(steam_protocol::Outcome::Unknown),
+        "error={error:?} runs={:?}",
+        original.runs
+    );
     assert!(original.uncertain());
-    let inspect = COMPLETE.replace("subscription='unknown'", "subscription='subscribed'");
+    let inspect = complete_plan(
+        "inspect-no-install-0",
+        Action::Inspect,
+        &[42],
+        "subscribed",
+        "observed",
+    );
     let config = SteamClientConfig {
-        helper_path: helper(root.path(), &inspect),
+        helper_path: helper(root.path(), &[inspect]),
         runtime_dir: None,
         total_deadline: Duration::from_secs(2),
     };
     let mut observed = NativeReport::new(Action::Inspect, None);
     observed.pending = original.pending.clone();
-    native_acquisition::run(
+    let (_, error) = native_acquisition::run(
         &config,
         "inspect-no-install",
         &[42],
@@ -192,6 +265,7 @@ emit(dict(kind='terminal'))
         &AtomicBool::new(false),
         &mut |_| {},
     );
+    assert!(error.is_none(), "error={error:?} runs={:?}", observed.runs);
     assert!(
         observed.uncertain(),
         "known subscription with no install observation cannot resolve a pending download"
@@ -215,24 +289,27 @@ emit(dict(kind='terminal'))
             if valid { "42" } else { "99" },
         )
         .unwrap();
-        let mode = format!(
-            r#"
-for phase in ['before','after']:
- install=dict(path=str(root/'copy'),size_bytes=1,timestamp=7,freshness='{freshness}') if phase=='before' or {after} else None
- emit(dict(kind='observation',item_id=42,phase=phase,facts=dict(subscription='subscribed',install=install)))
-emit(dict(kind='outcome',item_id=42,outcome='observed',detail=None))
-emit(dict(kind='terminal'))
-"#,
-            after = if after { "True" } else { "False" }
+        let copy = install(&root.path().join("copy"), freshness);
+        let plan = Plan::new(
+            "refresh-0",
+            Action::Inspect,
+            &[42],
+            item_payloads(
+                42,
+                "subscribed",
+                copy.clone(),
+                if after { copy } else { Value::Null },
+                "observed",
+            ),
         );
         let config = SteamClientConfig {
-            helper_path: helper(root.path(), &mode),
+            helper_path: helper(root.path(), &[plan]),
             runtime_dir: None,
             total_deadline: Duration::from_secs(2),
         };
         let mut refreshed = NativeReport::new(Action::Inspect, None);
         refreshed.pending = original.pending.clone();
-        native_acquisition::run(
+        let (_, error) = native_acquisition::run(
             &config,
             "refresh",
             &[42],
@@ -241,6 +318,7 @@ emit(dict(kind='terminal'))
             &AtomicBool::new(false),
             &mut |_| {},
         );
+        assert!(error.is_none(), "error={error:?} runs={:?}", refreshed.runs);
         assert_eq!(
             !refreshed.uncertain(),
             resolved,
@@ -277,14 +355,15 @@ fn invalid_before_does_not_downgrade_current_after_or_pending_refresh() {
     )
     .unwrap();
     fs::write(about.join("PublishedFileId.txt"), "42").unwrap();
-    let mode = r#"
-for phase in ['before','after']:
- path = root/('old-invalid' if phase=='before' else 'new-copy')
- emit(dict(kind='observation',item_id=42,phase=phase,facts=dict(subscription='subscribed',install=dict(path=str(path),size_bytes=1,timestamp=7,freshness='current'))))
-emit(dict(kind='outcome',item_id=42,outcome='installed' if r['action']=='download' else 'observed',detail=None))
-emit(dict(kind='terminal'))
-"#;
-    let (native, report, error) = run(root.path(), mode, &[42], Action::Download);
+    let before = install(&root.path().join("old-invalid"), "current");
+    let after = install(&root.path().join("new-copy"), "current");
+    let plan = Plan::new(
+        "fixture-0",
+        Action::Download,
+        &[42],
+        item_payloads(42, "subscribed", before.clone(), after.clone(), "installed"),
+    );
+    let (native, report, error) = run(root.path(), &[plan], &[42], Action::Download);
     assert!(error.is_none());
     assert_eq!(native.items[0].validation_errors.len(), 1);
     assert!(native.items[0].validation_errors[0].contains("old-invalid"));
@@ -306,8 +385,9 @@ emit(dict(kind='terminal'))
     assert_eq!(report.items[0].installations.len(), 1);
     assert_eq!(report.items[0].download, DownloadOutcome::Succeeded);
 
-    let failed = COMPLETE.to_owned() + "\nsys.exit(7)\n";
-    let (original, _, error) = run(root.path(), &failed, &[42], Action::Download);
+    let mut failed = complete_plan("fixture-0", Action::Download, &[42], "unknown", "unknown");
+    failed.exit_code = 7;
+    let (original, _, error) = run(root.path(), &[failed], &[42], Action::Download);
     assert!(error.is_some() && original.uncertain());
     assert_eq!(original.runs[0].status, "ProcessFailed");
     assert!(original.runs[0].protocol_complete);
@@ -343,8 +423,14 @@ emit(dict(kind='terminal'))
     assert_eq!(original.pending.len(), 1);
     let mut refreshed = NativeReport::new(Action::Inspect, None);
     refreshed.pending = original.pending.clone();
+    let plan = Plan::new(
+        "refresh-0",
+        Action::Inspect,
+        &[42],
+        item_payloads(42, "subscribed", before, after, "observed"),
+    );
     let config = SteamClientConfig {
-        helper_path: helper(root.path(), mode),
+        helper_path: helper(root.path(), &[plan]),
         runtime_dir: None,
         total_deadline: Duration::from_secs(2),
     };
@@ -385,13 +471,14 @@ fn sdk_installed_does_not_make_invalid_or_mismatched_content_usable() {
         }
         // A valid mod folder belongs to another item: cannot advertise it as item 42.
         fs::write(about.join("PublishedFileId.txt"), "99").unwrap();
-        let mode = r#"
-for phase in ['before','after']:
- emit(dict(kind='observation',item_id=42,phase=phase,facts=dict(subscription='subscribed',install=dict(path=str(root/'copy'),size_bytes=1,timestamp=7,freshness='current'))))
-emit(dict(kind='outcome',item_id=42,outcome='installed',detail=None))
-emit(dict(kind='terminal'))
-"#;
-        let (native, report, error) = run(root.path(), mode, &[42], Action::Download);
+        let copy = install(&root.path().join("copy"), "current");
+        let plan = Plan::new(
+            "fixture-0",
+            Action::Download,
+            &[42],
+            item_payloads(42, "subscribed", copy.clone(), copy, "installed"),
+        );
+        let (native, report, error) = run(root.path(), &[plan], &[42], Action::Download);
         assert!(error.is_none());
         assert_eq!(
             native.items[0].outcome,

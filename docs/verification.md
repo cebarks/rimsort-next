@@ -80,6 +80,19 @@ Creation and lookup are distinct operations, not assumed to return the same erro
 Workflow trace expectations construct native paths rather than hard-coding Unix
 separators. No case is skipped or treated as success after an unchecked error.
 
+The child-liveness fixture uses a ready/release handshake and atomic marker
+publication instead of assuming a child finishes writing when its file appears.
+Keyboard fixtures separately await successful startup recovery after catalog
+installation; an idle recovery with a terminal error is explicitly not ready.
+Native acquisition behavior tests use a compiled Rust fixture with independently
+prepared request/response plans, not a Python interpreter inside the adapter's
+two-second deadline. Unplanned requests are rejected and recorded; strict real
+subprocess/protocol, batching, partial-fact and cleanup assertions remain. Fixture
+compilation and plan creation finish before the adapter clock starts. This removes
+an interpreter dependency, not proof of the earlier macOS timeout's exact cause.
+CI uses `--no-fail-fast` to continue remaining test targets after individual test
+failures. Those failures still fail the job and block release/archive steps.
+
 A new hosted matrix is required for these fixture changes. Successful Windows
 root probes can be retained with the installer unit group's `--nocapture` option.
 Windows acquisition remains disabled; fixture/build/archive success does not

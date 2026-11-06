@@ -96,7 +96,7 @@ jobs:
           timeout 15s du -sh target/check || printf 'target/check size unavailable or timed out\n'
       - name: Tests
         env: ${{ matrix.check-env }}
-        run: cargo test --locked --workspace --target ${{ matrix.target }}
+        run: cargo test --locked --workspace --no-fail-fast --target ${{ matrix.target }}
       - name: Linux resources after Tests
         if: always() && runner.os == 'Linux'
         shell: bash
